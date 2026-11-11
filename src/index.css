@@ -1,0 +1,191 @@
+@import "tailwindcss";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Inter Variable', -apple-system, 'Segoe UI', Roboto, system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-header: var(--header);
+    --color-nav: var(--nav);
+    --color-link: var(--link);
+    --color-success: var(--success);
+    --color-warning: var(--warning);
+    --shadow-2xs: 0 0 #0000;
+    --shadow-xs: 0 0 #0000;
+    --shadow-sm: 0 0 #0000;
+    --shadow: 0 0 #0000;
+    --shadow-md: 0 0 #0000;
+    --shadow-lg: 0 0 #0000;
+    --shadow-xl: 0 0 #0000;
+    --shadow-2xl: 0 0 #0000;
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-primary-border: var(--primary-border);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: var(--radius);
+    --radius-2xl: var(--radius);
+    --radius-3xl: var(--radius);
+    --radius-4xl: var(--radius);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground;
+    }
+  html {
+    @apply font-sans;
+    }
+}
+
+/* Strict UI: no motion, no shadows. Numbers line up in tables. */
+/* Type scale (16px root): xl 20 page title · base 16 section / panel title · sm 14 body, controls, table cells ·
+   13px table headers · xs 12 hints, labels, footers · 2xl 24 KPI values. */
+@layer base {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  html { font-size: 16px; }
+  /* No rubber-band / sideways page drag: header and page stay put, only real scroll areas scroll. */
+  html, body { overscroll-behavior: none; }
+  body { overflow-x: clip; -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  /* Inner scrollers: no sideways bounce or swipe-back; the vertical wheel passes on to the page at the edge.
+     Vertical-only scrollers (sheet body, dialogs, menus) neither bounce nor drag the page behind them. */
+  .overflow-auto, .overflow-x-auto { overscroll-behavior-x: none; overscroll-behavior-y: auto; }
+  .overflow-y-auto { overscroll-behavior: none; }
+  /* Phones: every control in a row has the same text size and height. Inputs need 16px (else iOS zooms on focus),
+     so buttons and selects follow them; 36px height is also a comfortable tap target. */
+  @media (max-width: 640px) {
+    input:not([type=checkbox]):not([type=radio]), textarea, [data-slot=select-trigger],
+    button[data-variant]:not([data-variant=ghost])[data-size=default], button[data-variant]:not([data-variant=ghost])[data-size=sm],
+    button[data-variant]:not([data-variant=ghost])[data-size=lg], a[data-variant]:not([data-variant=ghost])[data-size=default] {
+      font-size: 16px !important;
+    }
+    input:not([type=checkbox]):not([type=radio]):not([type=file]), [data-slot=select-trigger],
+    button[data-variant][data-size=default], button[data-variant][data-size=sm], button[data-variant][data-size=lg], a[data-variant][data-size=default] {
+      height: 36px !important;
+    }
+    button[data-variant=outline][data-size=icon] { width: 36px !important; height: 36px !important; }
+  }
+  .animate-spin { animation: spin 1s linear infinite !important; }
+  body { font-feature-settings: "cv11", "ss03"; }
+  .num, td, th { font-variant-numeric: tabular-nums; }
+}
+
+/* Dark only (product decision 09/11): the dark palette is the base. */
+:root {
+    --radius: 0.25rem;
+    /* Keitaro-like dark: graphite page, darker graphite top bar, Keitaro green (#7dc171) is the only accent; links stay blue */
+    --background: #222425;
+    --foreground: #d9dbdc;
+    --card: #222425;
+    --card-foreground: #d9dbdc;
+    --popover: #2a2c2d;
+    --popover-foreground: #d9dbdc;
+    --primary: #7dc171;
+    --primary-foreground: #ffffff;
+    --primary-border: #69b659;
+    --secondary: #2c2e2f;
+    --secondary-foreground: #d9dbdc;
+    --muted: #292b2c;
+    --muted-foreground: #a3a9ab;
+    --accent: #2f3b31;
+    --accent-foreground: #e6e8e9;
+    --destructive: #f08a8a;
+    --border: #353839;
+    --input: #353839;
+    --ring: #7dc171;
+    --chart-1: #7dc171;
+    --chart-2: #5b9bd5;
+    --chart-3: #e0b453;
+    --chart-4: #f08a8a;
+    --chart-5: #9aa0a3;
+    --success: #7dc171;
+    --warning: #e0b453;
+    --header: #1a1c1d;
+    --nav: #b4babc;
+    --link: #7eaed8;
+}
+:root { color-scheme: dark; }
+
+/* Touch: bigger hit areas (~38px) for small controls. Hit area only (pseudo-elements, tab bar height); icons and controls keep their size. */
+@media (pointer: coarse) {
+  /* checkbox / radio / switch: the existing ::after is widened */
+  [data-slot="checkbox"]::after,
+  [data-slot="radio-group-item"]::after,
+  [data-slot="switch"]::after {
+    inset: -0.65rem -0.75rem;
+  }
+  /* buttons shorter than 38px grow vertically; square icon buttons also sideways */
+  [data-slot="button"] { position: relative; }
+  [data-slot="button"]::after {
+    content: "";
+    position: absolute;
+    top: min(0px, calc((100% - 2.25rem) / 2));
+    bottom: min(0px, calc((100% - 2.25rem) / 2));
+    left: 0;
+    right: 0;
+  }
+  [data-slot="button"][class~="size-5"]::after,
+  [data-slot="button"][class~="size-6"]::after,
+  [data-slot="button"][class~="size-7"]::after {
+    left: min(0px, calc((100% - 2.25rem) / 2));
+    right: min(0px, calc((100% - 2.25rem) / 2));
+  }
+  /* tabs: taller bar, whole bar height is tappable */
+  [data-slot="tabs-list"][aria-orientation="horizontal"] { height: 2.4rem !important; }
+  [data-slot="tabs-list"][aria-orientation="horizontal"] [data-slot="tabs-trigger"]::before {
+    content: "";
+    position: absolute;
+    inset: -3px -2px;
+  }
+  /* sort buttons in table headers, links */
+  th > button, a:not([data-slot]) { position: relative; }
+  th > button::after, a:not([data-slot])::after {
+    content: "";
+    position: absolute;
+    inset: -0.5rem -0.25rem;
+  }
+}
+
+/* Tabs: focus ring only for keyboard focus (tabs.tsx marks pointer-initiated focus with data-pointer). */
+[data-slot="tabs-trigger"][data-pointer]:focus-visible { outline: none; box-shadow: none; border-color: transparent; }
+[data-slot="tabs-list"][data-variant="default"] [data-slot="tabs-trigger"][data-pointer][data-active]:focus-visible { border-color: var(--input); }
+
+/* Unlayered on purpose (beats Tailwind utilities): one line between rows, never two.
+   The last body row has no bottom line — the table frame or the totals line is already there. */
+/* Toasts: the close button does not change on hover either. */
+[data-sonner-toast] [data-close-button]:hover { background: var(--popover) !important; border-color: var(--border) !important; color: var(--popover-foreground) !important; }
+
+tbody:last-of-type > tr:last-child > td,
+tbody:last-of-type > tr:last-child { border-bottom-width: 0; }
