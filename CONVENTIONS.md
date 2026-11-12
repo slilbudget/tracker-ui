@@ -15,22 +15,22 @@ react-router v8 (hash router), lucide-react icons (directly or via `@/components
 - Type scale (16px root, owner 10/11): page title `text-xl` semibold → section / sheet / dialog title `text-base` (sections medium, panel titles semibold) →
   body `text-sm` (table cells, controls, forms, menus, nav) → table headers `text-[13px]` muted → hints, form labels' notes, footers, badges `text-xs` muted.
   KPI tiles: value `text-2xl` semibold, label and sub-line `text-xs`. Hints stay small on purpose: the hierarchy is what makes the main things stand out.
-- Dense: tables at `text-sm`, row height h-9, totals row medium weight; controls h-8 (shadcn default size), `sm` h-7 only inside rows and popovers. Numbers right-aligned, `num` class (tabular).
+- Dense: tables at 13px with 32px rows (global rules at the end of `index.css`), totals row medium weight; controls h-8 (shadcn default size), `sm` h-7 only inside rows and popovers. Numbers right-aligned, `num` class (tabular).
 - Dark only (Keitaro-like palette in `src/index.css`). Use only theme tokens (`bg-background`, `bg-card`, `bg-muted`, `border`,
-  `text-muted-foreground`...), never raw colors. Font: Inter (UI), JetBrains Mono (ids, urls).
+  `text-muted-foreground`...), never raw colors. Font: system Helvetica Neue / Arial (UI), Menlo / Consolas (ids, urls); no webfonts.
 - Reuse first: ready shadcn components / registries and lucide icons; never draw custom icons or hand-roll what a maintained component does.
 - Tables: same column order and header names for the same metric everywhere (names from `METRICS` in `src/api/meta.ts`), numbers right,
   text left, header alignment = cell alignment.
 - Works from 360px wide: toolbars wrap, tables scroll horizontally, side sheets go full width.
 - Russian UI copy, short and concrete. Buttons name the action («Создать поток», «В архив»). Errors say what is wrong and how to fix.
-- Keitaro is the functional reference (`../refs/keitaro/*.png`, `../.notes/research-keitaro-ui.md`): same sections, entities, fields, terms.
-  Improve the UX, never drop a function.
+- Keitaro is the functional reference: same sections, entities, fields, terms. Improve the UX, never drop a function.
 
 ## Structure
 
 - `src/api/types.ts` domain model (field names = Keitaro API). `src/api/meta.ts` dictionaries (filters, actions, metrics, dimensions).
-- `src/api/client.ts` = the API contract. Pages call only `api.*` through TanStack Query. Need a new endpoint? Add a function to
-  `client.ts` (mock body over `src/mock/seed.ts`), keep it one-endpoint-shaped.
+- `api` in `src/api/client.ts` = the API contract (sub-groups live in `client-*.ts` and are mounted on `api`). Pages call only `api.*`
+  through TanStack Query, never `client-*` objects or `src/mock`. New endpoint: a function on `api`, one-endpoint-shaped; mock helpers in `api/mock-util.ts`.
+  Backend handoff: [docs/backend.md](docs/backend.md); business rules: [docs/domain.md](docs/domain.md).
 - `src/features/<section>/` one folder per section. Do not edit other sections' folders.
 - Shared: `components/page.tsx` (Page, PageHeader, Toolbar, Section), `components/data-table.tsx` (DataTable),
   `components/common.tsx` (StateDot, SearchInput, StateFilter, metricColumns, metricSummary, ConfirmDialog, EntitySheet, FormRow,
@@ -68,27 +68,4 @@ react-router v8 (hash router), lucide-react icons (directly or via `@/components
 - Filters on their default («Все …», Select value "all") are muted; a chosen filter is in the normal text colour (select.tsx, no call-site code).
 - Spend: no BM / System User tokens in the tracker for now. Costs come from the team's own collector through `api.campaigns.updateCosts` (per ad / day) and by hand: campaign menu → «Обновить расходы».
 
-## Offers, caps, reference campaigns (10/11)
-- Offer group (`OfferGroup`) = advertiser product with the cap; dated terms hold caps (FTD / installs, per term or per day) and the fixed rate per offer. An offer never has its own cap.
-- Offer geo (`country`, `regions`) is a routing restriction, not a label: a stream sends a click only to offers allowed for its place.
-- Offer replacement (`/offers/replace`, resource `offer_swap`: full = all campaigns, groups = the team's) always shows the preview of every stream and can be undone.
-- Reference campaign: `is_template` / `template_id`; «Применить к кампаниям» copies streams by name, keeps weights by default.
-- Mock-only logic lives in `api/client-offers.ts` (cap counting, swap, template diff); install = unique campaign click (AAA 10/11).
-
-## Facebook data, PBI reports, problems (10/11)
-- FB entities (`FbAdAccount › FbCampaign › FbAdset › FbAd`, daily `FbDayStat` impressions / spend) come from the team's collector; a click is matched to its ad by `sub_id_6` (ad id). Report dimensions `agency`, `fb_account`, `fb_campaign`, `fb_adset`, `fb_ad`, plus `team`, `approach` (campaign field), `product`, `reject_reason`.
-- Impressions are per ad / day; the mock gives each click an equal share so any grouping sums up. Real backend: join FB stats by ad id + day; impressions / CPM / CTR are exact only on ad-derived dimensions.
-- FB metrics: `impressions`, `ctr`, `cpm`, `c2i`, `i2r`, `approve` (= r2d), `i2d`, `install_cost`, `uepc`, `cost_fee` / `profit_fee` / `roi_fee` (spend + agency %, the PBI «Спэнд+%»), `rejected_revenue`. Preset «Facebook» = PBI column set.
-- Report: up to 10 levels; «PBI: …» groupings repeat the FacebookNew pages (also set columns / filters); slicers row = IN_LIST filters (hidden behind «Быстрые фильтры» on phones).
-- Rejections carry `reject_reason` (partner wording) and `rejected_revenue` (lost payout); CSV import 5th column `reason`.
-- Problems (`/problems`, resource `problems`, `api/client-problems.ts`): checks run server-side every 5 min, one row per open problem with numbers and links; mute 4 h / resolved / reopen. Buyers handle only problems of their campaigns. Header shows the open count (red if critical).
-- Click sheet «Откуда пришёл и куда ушёл»: account › FB campaign (naming check) › ad set › ad, partner postbacks, outgoing postbacks.
-
-## AAA edits 11/11 (Google Doc, screens in refs/aaa-1111/)
-- Caps editor = table FTD / installs × «за период» / «в день»; empty cell = no cap.
-- Offer geo: countries + regions of those countries (`REGIONS` in meta: US states, DE Länder, CA provinces …); region filter options = all regions.
-- Campaign: tracking link already carries the parameters (name=source macro); campaign S2S tab shows the source postback (sent by default for all campaigns of the source) + extra campaign postbacks.
-- Approaches: shared directory (`Approach` {name, code}), «Новый» in campaign forms for any buyer, managed in Settings with the ad naming template (`{подход}` token); unknown code in an ad name → problem.
-- Offer swap pickers show the current cap of each offer's group; full ones last.
-- «Для IT» notes (`features/devnotes/notes.tsx`): collapsed note next to a feature + `/it-notes` page; toggle in the user menu.
-- Ad accounts (`/ad-accounts`, resource `ad_accounts`, `api/client-accounts.ts`): account (token / proxy admin only), assignment to a buyer by period with provider fee (spend of a day → that day's buyer and fee: `accountOnDay`), providers tab. Problems `spend_diff`, `account_error`. Nav: «Кабинеты» after «Кампании»; «Тренды» moved into «Отчёты».
+Business rules (offers and caps, FB data, ad accounts, approaches, problems) are in [docs/domain.md](docs/domain.md); keep that file and the «Для IT» notes (`src/features/devnotes/notes.tsx`) in step with the code.

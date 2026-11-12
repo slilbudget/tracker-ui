@@ -8,7 +8,7 @@ import { ChevronDownIcon, EllipsisIcon, PlusIcon } from "lucide-react"
 import type { ConversionStatus, Integration } from "@/api/types"
 import { CONVERSION_STATUSES } from "@/api/meta"
 import { api } from "@/api/client"
-import { EMPTY_EXTRA, systemApi, type IntegrationFull } from "@/api/client-system"
+import { EMPTY_EXTRA, type IntegrationFull } from "@/api/client-system"
 import { useAccess, useUrlParam } from "@/app/state"
 import { Page, PageHeader, Toolbar } from "@/components/page"
 import { DataTable } from "@/components/data-table"
@@ -45,26 +45,26 @@ export default function IntegrationsPage() {
   const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns.list })
   const full = useQuery({
     queryKey: ["integrations", Number(editId)],
-    queryFn: () => systemApi.integrations.get(Number(editId)),
+    queryFn: () => api.integrations.get(Number(editId)),
     enabled: !!editId && editId !== "new",
   })
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["integrations"] })
   const save = useMutation({
-    mutationFn: (v: Parameters<typeof systemApi.integrations.save>[0]) => systemApi.integrations.save(v),
+    mutationFn: (v: Parameters<typeof api.integrations.save>[0]) => api.integrations.save(v),
     onSuccess: (_, v) => { invalidate(); toast.success(v.id ? "Интеграция сохранена" : "Интеграция добавлена"); setEditId(""); setKindParam("") },
   })
   const setState = useMutation({
-    mutationFn: ({ id, state }: { id: number; state: "active" | "paused" }) => systemApi.integrations.setState(id, state),
+    mutationFn: ({ id, state }: { id: number; state: "active" | "paused" }) => api.integrations.setState(id, state),
     onSuccess: (_, v) => { invalidate(); toast.success(v.state === "paused" ? "Интеграция на паузе" : "Интеграция возобновлена") },
   })
   const sync = useMutation({
-    mutationFn: (id: number) => systemApi.integrations.sync(id),
+    mutationFn: (id: number) => api.integrations.sync(id),
     onSuccess: () => { invalidate(); toast.success("Синхронизация выполнена") },
     onError: (e: Error) => toast.error(e.message),
   })
   const remove = useMutation({
-    mutationFn: (id: number) => systemApi.integrations.remove(id),
+    mutationFn: (id: number) => api.integrations.remove(id),
     onSuccess: () => { invalidate(); toast.success("Интеграция удалена") },
   })
 

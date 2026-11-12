@@ -67,7 +67,7 @@ export default function AffiliateNetworksPage() {
       v.id ? api.affiliateNetworks.update(v.id, v) : api.affiliateNetworks.create(v as Omit<AffiliateNetwork, "id">),
     onSuccess: (_, v) => {
       qc.invalidateQueries({ queryKey: ["affiliateNetworks"] })
-      toast.success(v.id ? "Партнёрка сохранена" : "Партнёрка создана")
+      toast.success(v.id ? "Партнёрская сеть сохранена" : "Партнёрка создана")
       setEditId("")
     },
   })
@@ -168,7 +168,7 @@ export default function AffiliateNetworksPage() {
               )
             : undefined
         }
-        empty={q || state ? "Ничего не найдено по фильтрам" : "Партнёрок пока нет"}
+        empty={q || state ? "Ничего не найдено по фильтрам" : "Партнёрских сетей пока нет"}
       />
 
       <NetworkSheet
@@ -217,7 +217,8 @@ function NetworkSheet({
   const key = network?.id ?? "new"
   const [loadedKey, setLoadedKey] = useState<string | number | null>(null)
   const defaultPostback = `https://trk.example.com/${postbackKey ?? "key"}/postback?subid={sub1}&status={status}&payout={payout}`
-  if (open && loadedKey !== key) {
+  // wait for the settings: the default postback carries the tracker's postback key
+  if (open && loadedKey !== key && (network || postbackKey)) {
     setLoadedKey(key)
     setErr({})
     setForm(network ?? { name: "", state: "active", offer_param: "sub1={subid}", postback_url: defaultPostback, notes: "" })

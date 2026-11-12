@@ -4,7 +4,7 @@ import { Link } from "react-router"
 import { useQueries, useQuery } from "@tanstack/react-query"
 import type { ConversionStatus, DateRange, ReportFilter } from "@/api/types"
 import { api } from "@/api/client"
-import { statsApi } from "@/api/client-stats"
+
 import { COUNTRIES, REJECT_REASONS, STREAM_FILTERS } from "@/api/meta"
 import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -25,7 +25,7 @@ export function CampaignSelect({ value, onChange, className = "w-52" }: { value:
 }
 
 export function useNames() {
-  return useQuery({ queryKey: ["names"], queryFn: statsApi.names, staleTime: 60_000 })
+  return useQuery({ queryKey: ["names"], queryFn: api.stats.names, staleTime: 60_000 })
 }
 
 // Page index that resets when `resetKey` changes (filters, search, period).

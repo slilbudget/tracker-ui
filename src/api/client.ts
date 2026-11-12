@@ -2,22 +2,22 @@
 // Swap the bodies for fetch() calls when the Go API is ready, keeping the signatures.
 import type {
   AffiliateNetwork, ApiKey, AuditEntry, Campaign, Click, Conversion, DateRange, Domain, Group, GroupType, ID,
-  Integration, Landing, Offer, PostbackLogEntry, ReportFilter, ReportRequest, ReportResponse, Role, Settings,
+  Landing, Offer, PostbackLogEntry, ReportFilter, ReportRequest, ReportResponse, Role, Settings,
   Stream, TrafficSource, User,
 } from "./types"
 import * as db from "@/mock/seed"
 import { buildReport, filterClicks, statsBy } from "@/mock/report"
-import { canSeeCampaign } from "@/mock/scope"
+import { canSeeCampaign, viewerGroupIds, viewerUser } from "@/mock/scope"
 import { inRange, resolveRange } from "@/lib/dates"
 import { offersApi } from "./client-offers"
 import { fbApi, problemsApi } from "./client-problems"
 import { directoryApi } from "./client-directory"
 import { accountsApi } from "./client-accounts"
+import { statsApi } from "./client-stats"
+import { integrationsApi, systemApi } from "./client-system"
+import { catalogApi } from "./client-catalog"
+import { nextId, now, wait } from "./mock-util"
 
-const LATENCY = 30
-const wait = <T,>(v: T): Promise<T> => new Promise((res) => setTimeout(() => res(structuredClone(v)), LATENCY))
-const nextId = (xs: { id: number }[]) => Math.max(0, ...xs.map((x) => x.id)) + 1
-const now = () => new Date().toISOString()
 
 class ApiError extends Error {
   fields?: Record<string, string>
@@ -73,6 +73,17 @@ export const api = {
   campaigns: {
     ...crud<Campaign>(db.campaigns, { touch: true }),
     list: () => wait(db.campaigns.filter((c) => c.state !== "deleted" && canSeeCampaign(c.id))),
+    // archived or outside the viewer's scope = not found
+    get: (id: ID) => {
+      const c = db.campaigns.find((x) => x.id === id)
+      return c && c.state !== "deleted" && canSeeCampaign(id) ? wait(c) : Promise.reject(new ApiError("Кампания не найдена"))
+    },
+    // the owner is the current user (the backend takes it from the session)
+    create: (data: Omit<Campaign, "id">) => {
+      const c: Campaign = { ...data, id: nextId(db.campaigns), owner_id: viewerUser().id, created_at: now(), updated_at: now() }
+      db.campaigns.push(c)
+      return wait(c)
+    },
     stats: (range: DateRange) => wait(Object.fromEntries(statsBy("campaign_id", range))),
     // «Обновить расходы» (as in Keitaro): the sum replaces the cost of the matching clicks of the period and is spread
     // evenly over them. The team's spend collector calls the same endpoint per ad / day (sub_id_6 = ad id).
@@ -89,10 +100,11 @@ export const api = {
     templateDiff: offersApi.templates.diff,
     applyTemplate: offersApi.templates.apply,
     clone: (id: ID) => {
-      const src = db.campaigns.find((c) => c.id === id)!
-      // a copy of the reference is an ordinary campaign linked to it
+      const src = db.campaigns.find((c) => c.id === id)
+      if (!src || !canSeeCampaign(id)) return Promise.reject(new ApiError("Кампания не найдена"))
+      // a copy of the reference is an ordinary campaign linked to it, owned by whoever cloned it
       const copy = {
-        ...structuredClone(src), id: nextId(db.campaigns), name: `${src.name} (копия)`, created_at: now(), updated_at: now(),
+        ...structuredClone(src), id: nextId(db.campaigns), name: `${src.name} (копия)`, created_at: now(), updated_at: now(), owner_id: viewerUser().id,
         is_template: false, template_id: src.is_template ? src.id : src.template_id,
       }
       db.campaigns.push(copy)
@@ -104,7 +116,7 @@ export const api = {
   streams: {
     ...crud<Stream>(db.streams),
     byCampaign: (campaignId: ID) =>
-      wait(db.streams.filter((s) => s.campaign_id === campaignId && s.state !== "deleted").sort((a, b) => a.position - b.position)),
+      wait(canSeeCampaign(campaignId) ? db.streams.filter((s) => s.campaign_id === campaignId && s.state !== "deleted").sort((a, b) => a.position - b.position) : []),
     stats: (range: DateRange) => wait(Object.fromEntries(statsBy("stream_id", range))),
     // Bulk weight update: the split editor saves all weights in one call.
     setWeights: (weights: { id: ID; weight: number }[]) => {
@@ -131,6 +143,9 @@ export const api = {
   approaches: directoryApi.approaches,
   adNaming: directoryApi.adNaming,
   fb: fbApi,
+  stats: statsApi,
+  system: systemApi,
+  catalog: catalogApi,
   affiliateNetworks: {
     ...crud<AffiliateNetwork>(db.affiliateNetworks, { touch: true }),
     stats: (range: DateRange) => wait(Object.fromEntries(statsBy("affiliate_network_id", range))),
@@ -148,7 +163,8 @@ export const api = {
     },
   },
   groups: {
-    list: (type: GroupType) => wait(db.groups.filter((g) => g.type === type)),
+    // campaign groups are access scopes: a scoped viewer gets only their own
+    list: (type: GroupType) => wait(db.groups.filter((g) => g.type === type && (type !== "campaigns" || viewerGroupIds() == null || viewerGroupIds()!.includes(g.id)))),
     create: (g: Omit<Group, "id">) => {
       const x = { ...g, id: nextId(db.groups) }
       db.groups.push(x)
@@ -173,7 +189,7 @@ export const api = {
       if (q.search) rows = rows.filter((c) => c.sub_id.includes(q.search!) || c.ip.includes(q.search!) || c.external_id.includes(q.search!))
       return wait({ rows: rows.slice(q.offset, q.offset + q.limit).map(withOffer), total: rows.length })
     },
-    get: (subId: string) => { const c = db.clicks.find((x) => x.sub_id === subId); return wait(c ? withOffer(c) : null) },
+    get: (subId: string) => { const c = db.clicks.find((x) => x.sub_id === subId && canSeeCampaign(x.campaign_id)); return wait(c ? withOffer(c) : null) },
   },
   conversions: {
     log: (q: { range: DateRange; search?: string; status?: string; campaign_id?: ID; network_id?: ID; buyer_id?: ID; limit: number; offset: number }) => {
@@ -207,11 +223,6 @@ export const api = {
         last_in_at: db.postbackLog.find((p) => p.direction === "in")?.datetime ?? null,
       })
     },
-    retry: (id: ID) => {
-      const p = db.postbackLog.find((x) => x.id === id)
-      if (p) Object.assign(p, { result: "ok", http_code: 200, attempts: p.attempts + 1, message: "" })
-      return wait({ ok: true })
-    },
   },
   users: { ...crud<User>(db.users) },
   roles: { ...crud<Role>(db.roles) },
@@ -229,12 +240,12 @@ export const api = {
     },
   },
   audit: { list: () => wait(db.audit as AuditEntry[]) },
-  integrations: { ...crud<Integration>(db.integrations) },
+  integrations: integrationsApi,
   settings: {
     get: () => wait(db.settings as Settings),
     update: (patch: Partial<Settings>) => wait(Object.assign(db.settings, patch)),
   },
-  me: () => wait(db.users.find((u) => u.id === db.CURRENT_USER_ID)!),
+  me: () => wait(viewerUser()),
   // Global search: by name or exact ID in every section, plus an exact subid → the click.
   search: (q: string) => {
     const s = q.trim().toLowerCase()

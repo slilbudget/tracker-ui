@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { ChevronDownIcon, ChevronRightIcon, RefreshCwIcon } from "lucide-react"
 import type { PostbackLogEntry } from "@/api/types"
 import { api } from "@/api/client"
-import { systemApi, type RetryResult } from "@/api/client-system"
+import { type RetryResult } from "@/api/client-system"
 import { useAccess, useCanSeeMoney, useUrlParam } from "@/app/state"
 import { Page, PageHeader, Section, Toolbar } from "@/components/page"
 import { DataTable } from "@/components/data-table"
@@ -84,7 +84,7 @@ export default function PostbacksPage() {
   const networks = useQuery({ queryKey: ["affiliateNetworks"], queryFn: api.affiliateNetworks.list })
 
   const retry = useMutation({
-    mutationFn: (ids: number[]) => Promise.all(ids.map((id) => systemApi.postbacks.retry(id))),
+    mutationFn: (ids: number[]) => Promise.all(ids.map((id) => api.system.postbacks.retry(id))),
     onSuccess: (res: RetryResult[]) => {
       qc.invalidateQueries({ queryKey: ["postbacks"] })
       const bad = res.filter((r) => !r.ok)

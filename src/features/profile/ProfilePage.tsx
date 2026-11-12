@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import type { User } from "@/api/types"
 import { TIMEZONES } from "@/api/meta"
 import { api } from "@/api/client"
-import { systemApi } from "@/api/client-system"
+
 import { useUrlParam } from "@/app/state"
 import type { ReactNode } from "react"
 import { Page, PageHeader } from "@/components/page"
@@ -18,7 +18,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ApiKeysTable } from "@/features/users/UsersPage"
-
 
 // One frame per page, blocks separated by a thin line.
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -66,7 +65,7 @@ function ProfileForm({ me }: { me: User }) {
   const save = useMutation({
     mutationFn: async () => {
       await api.users.update(me.id, { name: name.trim(), timezone, language })
-      if (next) await systemApi.profile.changePassword(cur, next)
+      if (next) await api.system.profile.changePassword(cur, next)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["users"] })
@@ -144,10 +143,10 @@ function TwoFactor({ me }: { me: User }) {
   const [setup, setSetup] = useState(false)
   const [code, setCode] = useState("")
   const [confirmOff, setConfirmOff] = useState(false)
-  const secret = useQuery({ queryKey: ["2fa-secret"], queryFn: systemApi.profile.twoFactorSetup, enabled: setup })
+  const secret = useQuery({ queryKey: ["2fa-secret"], queryFn: api.system.profile.twoFactorSetup, enabled: setup })
 
   const toggle = useMutation({
-    mutationFn: (on: boolean) => systemApi.profile.setTwoFactor(me.id, on, code),
+    mutationFn: (on: boolean) => api.system.profile.setTwoFactor(me.id, on, code),
     onSuccess: (_, on) => {
       qc.invalidateQueries({ queryKey: ["me"] })
       qc.invalidateQueries({ queryKey: ["users"] })

@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { EllipsisIcon, FileIcon, FolderIcon, PlusIcon, ShieldCheckIcon } from "lucide-react"
 import type { Landing } from "@/api/types"
 import { api } from "@/api/client"
-import { catalogApi } from "@/api/client-catalog"
+
 import { useAccess, useHiddenMetrics, usePeriod, useUrlParam, useMissingRecord } from "@/app/state"
 import { Page, PageHeader, Toolbar } from "@/components/page"
 import { DataTable } from "@/components/data-table"
@@ -70,7 +70,7 @@ export default function LandingsPage() {
   const save = useMutation({
     mutationFn: async ({ v, zip }: { v: Partial<Landing> & { id?: number }; zip: File | null }) => {
       const saved = v.id ? await api.landings.update(v.id, v) : await api.landings.create(v as Omit<Landing, "id">)
-      if (zip && saved.landing_type === "local") await catalogApi.setLandingZip(saved.id, { name: zip.name, size: zip.size })
+      if (zip && saved.landing_type === "local") await api.catalog.setLandingZip(saved.id, { name: zip.name, size: zip.size })
       return saved
     },
     onSuccess: (saved, { v }) => {
@@ -263,7 +263,7 @@ function LandingSheet({
   const isLocal = landing?.landing_type === "local"
   const files = useQuery({
     queryKey: ["landing-files", landing?.id],
-    queryFn: () => catalogApi.landingFiles(landing!.id),
+    queryFn: () => api.catalog.landingFiles(landing!.id),
     enabled: open && !!landing && isLocal,
   })
   const savedZip = isLocal ? files.data?.zip ?? null : null
@@ -281,7 +281,7 @@ function LandingSheet({
   const checkUrl = async () => {
     setChecking(true)
     try {
-      const r = await catalogApi.checkUrl(form.url ?? "")
+      const r = await api.catalog.checkUrl(form.url ?? "")
       if (r.ok) toast.success(r.message)
       else toast.error(r.message)
     } finally {

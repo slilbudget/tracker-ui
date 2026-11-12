@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { PlusIcon, XIcon } from "lucide-react"
 import { CURRENCIES, TIMEZONES } from "@/api/meta"
 import { api } from "@/api/client"
-import { systemApi, type SystemSettings } from "@/api/client-system"
+import { type SystemSettings } from "@/api/client-system"
 import type { Settings } from "@/api/types"
 import { useAccess } from "@/app/state"
 import type { ReactNode } from "react"
@@ -44,7 +44,7 @@ const fromRows = (rows: AliasRow[]) =>
 
 export default function SettingsPage() {
   const base = useQuery({ queryKey: ["settings"], queryFn: api.settings.get })
-  const sys = useQuery({ queryKey: ["settings", "system"], queryFn: systemApi.settings.get })
+  const sys = useQuery({ queryKey: ["settings", "system"], queryFn: api.system.settings.get })
   const ready = base.data && sys.data
   return (
     <Page className="mx-0 max-w-3xl">
@@ -77,7 +77,7 @@ function SettingsForm({ initial }: { initial: Form }) {
   const save = useMutation({
     mutationFn: async () => {
       await api.settings.update({ ...form.base, global_aliases: fromRows(form.aliases) })
-      await systemApi.settings.update(form.sys)
+      await api.system.settings.update(form.sys)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["settings"] })
@@ -129,7 +129,7 @@ function SettingsForm({ initial }: { initial: Form }) {
                 <CopyButton value={form.base.postback_key} />
               </div>
             </FormRow>
-            <FormRow label="Таймаут S2S, сек" error={err.s2s} hint="Сколько ждать ответ пикселя или вебхука, прежде чем считать отправку неудачной.">
+            <FormRow label="Таймаут S2S, сек" error={err.s2s} hint="Сколько ждать ответа пикселя или вебхука, прежде чем считать отправку неудачной.">
               <Input
                 type="number" min={1} max={60} className="w-24" value={Number.isNaN(form.base.s2s_timeout_sec) ? "" : form.base.s2s_timeout_sec}
                 onChange={(e) => setBase("s2s_timeout_sec", num(e.target.value))} aria-invalid={!!err.s2s}

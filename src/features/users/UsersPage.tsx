@@ -7,7 +7,7 @@ import { EllipsisIcon, PlusIcon, Trash2Icon } from "lucide-react"
 import type { AccessLevel, ApiKey, Resource, Role, User } from "@/api/types"
 import { ACCESS_LEVELS, METRICS, RESOURCES, TIMEZONES } from "@/api/meta"
 import { api } from "@/api/client"
-import { systemApi } from "@/api/client-system"
+
 import { useAccess, useUrlParam, useMissingRecord } from "@/app/state"
 import { Page, PageHeader, Toolbar } from "@/components/page"
 import { DataTable } from "@/components/data-table"
@@ -98,7 +98,7 @@ function UsersTab({ canEdit }: { canEdit: boolean }) {
         : api.users.create({
             login: v.login!, name: v.name!, role_id: v.role_id!, team: v.team ?? "", state: v.state ?? "active",
             timezone: v.timezone ?? "Europe/London", language: v.language ?? "ru", group_ids: v.group_ids ?? [],
-            last_login_at: null, created_at: new Date().toISOString(), two_factor: false,
+            last_login_at: null, created_at: new Date().toISOString(), two_factor: false, account_transfer: v.account_transfer ?? "none",
           }),
     onSuccess: (_, v) => {
       qc.invalidateQueries({ queryKey: ["users"] })
@@ -217,6 +217,7 @@ function UsersTab({ canEdit }: { canEdit: boolean }) {
         groups={groups.data ?? []}
         takenLogins={(users.data ?? []).map((u) => u.login.toLowerCase())}
         readOnly={!canEdit}
+        isSelf={!!editing && editing.id === me.data?.id}
         onClose={() => setEditId("")}
         onSave={(v) => save.mutate(v)}
         saving={save.isPending}
@@ -235,9 +236,9 @@ function UsersTab({ canEdit }: { canEdit: boolean }) {
 }
 
 function UserSheet({
-  open, user, roles, teams, groups, takenLogins, readOnly, onClose, onSave, saving,
+  open, user, roles, teams, groups, takenLogins, readOnly, isSelf, onClose, onSave, saving,
 }: {
-  open: boolean; user?: User; roles: Role[]; teams: string[]; groups: { id: number; name: string }[]; takenLogins: string[]; readOnly: boolean
+  open: boolean; user?: User; roles: Role[]; teams: string[]; groups: { id: number; name: string }[]; takenLogins: string[]; readOnly: boolean; isSelf: boolean
   onClose: () => void; onSave: (v: Partial<User> & { password?: string }) => void; saving: boolean
 }) {
   const qc = useQueryClient()
@@ -252,7 +253,7 @@ function UserSheet({
     setErr({})
     setTempPass("")
     setNewTeam(false)
-    setForm(user ?? { login: "", name: "", password: "", role_id: (roles.find((r) => r.name === "Байер") ?? roles.filter((r) => !r.system).at(-1) ?? roles[0])?.id, team: "", state: "active", timezone: "Europe/London", language: "ru", group_ids: [] })
+    setForm(user ?? { login: "", name: "", password: "", role_id: (roles.find((r) => r.name === "Байер") ?? roles.filter((r) => !r.system).at(-1) ?? roles[0])?.id, team: "", state: "active", timezone: "Europe/London", language: "ru", group_ids: [], account_transfer: "none" })
   }
   if (!open && loadedKey !== null) setLoadedKey(null)
   const set = <K extends keyof User>(k: K, v: User[K]) => setForm((f) => ({ ...f, [k]: v }))
@@ -261,16 +262,16 @@ function UserSheet({
   const role = roles.find((r) => r.id === form.role_id)
   const usesGroups = !!role && Object.values(role.access).includes("groups")
 
-  const reset = useMutation({ mutationFn: (id: number) => systemApi.users.resetPassword(id), onSuccess: (r) => setTempPass(r.password) })
+  const reset = useMutation({ mutationFn: (id: number) => api.system.users.resetPassword(id), onSuccess: (r) => setTempPass(r.password) })
   const reset2fa = useMutation({
-    mutationFn: (id: number) => systemApi.users.reset2fa(id),
+    mutationFn: (id: number) => api.system.users.reset2fa(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["users"] }); setForm((f) => ({ ...f, two_factor: false })); toast.success("2FA сброшена, при входе пользователь настроит её заново") },
   })
 
   const submit = () => {
     const e: Record<string, string> = {}
     if (!user && !form.login?.trim()) e.login = "Введите логин"
-    if (!user && form.login && !/^[a-z0-9_.-]{3,}$/i.test(form.login.trim())) e.login = "Латиница, цифры, _ . - ; минимум 3 символа"
+    if (!user && form.login && !/^[a-z0-9_.-]{3,}$/i.test(form.login.trim())) e.login = "Латиница, цифры и символы _ . -, минимум 3 символа"
     if (!user && !e.login && takenLogins.includes((form.login ?? "").trim().toLowerCase())) e.login = "Такой логин уже есть"
     if (!form.name?.trim()) e.name = "Введите имя"
     if (!user && (form.password ?? "").length < 8) e.password = "Минимум 8 символов"
@@ -314,8 +315,8 @@ function UserSheet({
             <Input id="u-pass" type="password" autoComplete="new-password" value={form.password ?? ""} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} aria-invalid={!!err.password} />
           </FormRow>
         )}
-        <FormRow label="Роль" error={err.role_id} hint={role?.description}>
-          <Select value={form.role_id ? String(form.role_id) : ""} onValueChange={(v) => set("role_id", Number(v))}>
+        <FormRow label="Роль" error={err.role_id} hint={isSelf ? "Свою роль меняет другой администратор" : role?.description}>
+          <Select value={form.role_id ? String(form.role_id) : ""} disabled={isSelf} onValueChange={(v) => set("role_id", Number(v))}>
             <SelectTrigger className="w-full"><SelectValue placeholder="Выберите роль" /></SelectTrigger>
             <SelectContent>{roles.map((r) => <SelectItem key={r.id} value={String(r.id)}>{r.name}</SelectItem>)}</SelectContent>
           </Select>
@@ -362,6 +363,16 @@ function UserSheet({
             />
           </FormRow>
         )}
+        <FormRow label="Передача кабинетов" hint="Отдельное право, не зависит от роли. Тимлиду обычно — «Внутри своей команды»">
+          <Select value={form.account_transfer ?? "none"} onValueChange={(v) => set("account_transfer", v as User["account_transfer"])}>
+            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Нет</SelectItem>
+              <SelectItem value="team">Внутри своей команды — между её байерами</SelectItem>
+              <SelectItem value="all">Все кабинеты — закреплять свободные, передавать, освобождать</SelectItem>
+            </SelectContent>
+          </Select>
+        </FormRow>
         {user && (
           <FormRow label="2FA">
             <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -372,8 +383,8 @@ function UserSheet({
             </div>
           </FormRow>
         )}
-        <FormRow label="Включён" hint="Отключённый пользователь не может войти, данные сохраняются.">
-          <Switch checked={form.state === "active"} onCheckedChange={(v) => set("state", v ? "active" : "disabled")} />
+        <FormRow label="Включён" hint={isSelf ? "Себя выключить нельзя" : "Отключённый пользователь не может войти, данные сохраняются."}>
+          <Switch checked={form.state === "active"} disabled={isSelf} onCheckedChange={(v) => set("state", v ? "active" : "disabled")} />
         </FormRow>
       </fieldset>
     </EntitySheet>
@@ -692,7 +703,7 @@ export function ApiKeysTable({ userId, canManage }: { userId?: number; canManage
         left={canManage ? <Button onClick={() => setCreateOpen(true)}><Icon icon={PlusIcon} size={14} /> Создать ключ</Button> : undefined}
         right={<span className="text-xs text-muted-foreground">Ключ передаётся в заголовке <code className="font-mono">Api-Key</code> и действует с правами владельца</span>}
       />
-      <DataTable data={keys.data ? [...keys.data] : undefined} loading={keys.isLoading} columns={columns} getRowId={(k) => String(k.id)} storageKey={`api-keys-${userId ? "own" : "all"}`} empty="API-ключей нет" />
+      <DataTable data={keys.data ? [...keys.data] : undefined} loading={keys.isLoading} columns={columns} getRowId={(k) => String(k.id)} storageKey={`api-keys-${userId ? "own" : "all"}`} empty="API-ключей пока нет" />
       <CreateKeyDialog open={createOpen} onOpenChange={setCreateOpen} userId={userId} users={users.data ?? []} />
       <ConfirmDialog
         open={!!toDelete}
@@ -739,7 +750,7 @@ function CreateKeyDialog({ open, onOpenChange, userId, users }: { open: boolean;
             <p className="rounded-md border border-warning/40 p-2 text-xs text-warning">
               Больше этот ключ не покажут. Если потеряете, удалите его и создайте новый.
             </p>
-            <DialogFooter><Button onClick={() => close(false)}>Я сохранил ключ</Button></DialogFooter>
+            <DialogFooter><Button onClick={() => close(false)}>Готово</Button></DialogFooter>
           </div>
         ) : (
           <form
@@ -751,7 +762,7 @@ function CreateKeyDialog({ open, onOpenChange, userId, users }: { open: boolean;
             }}
           >
             <FormRow label="Название" error={err} htmlFor="k-name">
-              <Input id="k-name" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!!err} autoFocus />
+              <Input id="k-name" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={!!err} />
             </FormRow>
             {!userId && (
               <FormRow label="Пользователь">

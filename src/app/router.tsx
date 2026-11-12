@@ -1,6 +1,6 @@
 import { createHashRouter } from "react-router"
 import { Shell } from "./shell"
-import { NotFound } from "./not-found"
+import { NotFound, RouteError } from "./not-found"
 
 // Warm up every section chunk once the first screen is idle, so navigation feels instant.
 export function preloadSections() {
@@ -39,7 +39,7 @@ export const router = createHashRouter([
   {
     element: <Shell />,
     HydrateFallback: () => null,
-    children: [
+    children: [{ errorElement: <RouteError />, children: [
       { path: "/", lazy: () => import("@/features/dashboard/DashboardPage").then((m) => ({ Component: m.default })) },
       { path: "/campaigns", lazy: () => import("@/features/campaigns/CampaignsPage").then((m) => ({ Component: m.default })) },
       { path: "/campaigns/:id", lazy: () => import("@/features/campaigns/CampaignPage").then((m) => ({ Component: m.default })) },
@@ -65,6 +65,6 @@ export const router = createHashRouter([
       { path: "/it-notes", lazy: () => import("@/features/devnotes/notes").then((m) => ({ Component: m.default })) },
       { path: "/profile", lazy: () => import("@/features/profile/ProfilePage").then((m) => ({ Component: m.default })) },
       { path: "*", element: <NotFound /> },
-    ],
+    ] }],
   },
 ])

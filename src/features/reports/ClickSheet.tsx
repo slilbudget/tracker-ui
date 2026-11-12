@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query"
 import { CheckIcon, XIcon } from "lucide-react"
 import type { Click, Conversion } from "@/api/types"
 import { api } from "@/api/client"
-import { statsApi, type Names, type PathCheck } from "@/api/client-stats"
+import { type Names, type PathCheck } from "@/api/client-stats"
 import { useApp, useCanSeeMoney, useHiddenMetrics } from "@/app/state"
 import { CopyButton, EntitySheet } from "@/components/common"
 import { Icon } from "@/components/icon"
@@ -226,7 +226,7 @@ function Step({ n, label, children }: { n: number; label: string; children: Reac
 // Mock trace: campaign → streams checked in order with filter results → chosen stream → landing → offer.
 function ClickPath({ subId }: { subId: string }) {
   const [all, setAll] = useState(false)
-  const path = useQuery({ queryKey: ["clicks", "path", subId], queryFn: () => statsApi.clickPath(subId) })
+  const path = useQuery({ queryKey: ["clicks", "path", subId], queryFn: () => api.stats.clickPath(subId) })
   const p = path.data
   if (path.isLoading) return <p className="text-sm text-muted-foreground">Путь клика: загрузка…</p>
   if (!p) return null

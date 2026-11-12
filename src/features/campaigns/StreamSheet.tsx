@@ -1,3 +1,4 @@
+import { toast } from "sonner"
 // Stream editor in a side panel: Основное · Схема · Фильтры · Заметки.
 import { useState } from "react"
 import { PlusIcon, TriangleAlertIcon, XIcon } from "lucide-react"
@@ -53,6 +54,9 @@ export function StreamSheet({
 
   const submit = () => {
     if (!form.name.trim()) { setErr("Введите название потока"); setTab("main"); return }
+    // a broken stream would send traffic nowhere: the same problems that are shown block saving
+    const blocking = streamProblems(form)
+    if (blocking.length) { toast.error(`Поток не сохранён: ${blocking.join("; ")}`); return }
     onSave(form)
   }
 

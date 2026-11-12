@@ -4,9 +4,8 @@ import type { Click, Conversion, ConversionStatus, ID, StreamFilter } from "./ty
 import { streamFilterDef } from "./meta"
 import * as db from "@/mock/seed"
 import { registerConversion } from "@/mock/report"
+import { audit, wait } from "./mock-util"
 
-const LATENCY = 30
-const wait = <T,>(v: T): Promise<T> => new Promise((res) => setTimeout(() => res(structuredClone(v)), LATENCY))
 const names = <T extends { id: number; name: string }>(xs: T[]) => Object.fromEntries(xs.map((x) => [x.id, x.name])) as Record<number, string>
 const hex = (n: number) => Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join("")
 
@@ -33,12 +32,16 @@ function defaultPayout(c: Pick<Conversion, "offer_id">, status: ConversionStatus
   return db.offers.find((o) => o.id === c.offer_id)?.payout_value ?? 0
 }
 
-function logAudit(summary: string) {
-  const id = Math.max(0, ...db.audit.map((a) => a.id)) + 1
-  db.audit.unshift({
-    id, datetime: new Date().toISOString(), user_id: db.CURRENT_USER_ID, action: "update", resource: "conversions", resource_id: null,
-    summary, ip: "91.0.0.1",
-  })
+const logAudit = (summary: string) => audit("conversions", summary)
+
+// The one status transition used by manual edits and the CSV import, so both leave the same data:
+// a rejection keeps the lost payout and the reason; leaving «rejected» clears both.
+function setStatus(c: Conversion, status: ConversionStatus, reason = "") {
+  if (status === c.status) { if (status === "rejected" && reason) c.reject_reason = reason; return }
+  if (status === "rejected") { c.rejected_revenue = c.revenue; c.reject_reason = reason }
+  else { c.rejected_revenue = 0; c.reject_reason = "" }
+  c.previous_status = c.status
+  c.status = status
 }
 
 const STATUS_RU: Record<ConversionStatus, string> = {
@@ -60,10 +63,7 @@ const conversionsApi = {
       const c = db.conversions.find((x) => x.conversion_id === id)
       if (!c) continue
       if (patch.status && patch.status !== c.status) {
-        if (patch.status === "rejected") { c.rejected_revenue = c.revenue; c.reject_reason = patch.reject_reason ?? "" }
-        else { c.rejected_revenue = 0; c.reject_reason = "" }
-        c.previous_status = c.status
-        c.status = patch.status
+        setStatus(c, patch.status, patch.reject_reason)
         // payout follows the status unless it is set explicitly
         if (patch.revenue === undefined) c.revenue = c.revenue > 0 && patch.status !== "rejected" ? c.revenue : defaultPayout(c, patch.status)
       }
@@ -108,8 +108,7 @@ const conversionsApi = {
       if (!click) continue
       const ex = matchRow(r)
       if (ex) {
-        if (r.status === "rejected") { if (ex.status !== "rejected") ex.rejected_revenue = ex.revenue; ex.reject_reason = r.reason }
-        if (ex.status !== r.status) { ex.previous_status = ex.status; ex.status = r.status }
+        setStatus(ex, r.status, r.reason)
         ex.revenue = r.payout ?? defaultPayout(ex, r.status)
         updated++
       } else {

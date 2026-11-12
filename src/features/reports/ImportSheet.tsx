@@ -1,10 +1,11 @@
 // «Загрузить конверсии»: textarea with CSV lines → live preview of parsed rows and errors per line → import.
 // A single line is also the way to add a conversion by hand. An existing conversion of the same subid (and TID) is updated.
 import { useDeferredValue, useMemo, useState } from "react"
+import { api } from "@/api/client"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import type { ConversionStatus } from "@/api/types"
-import { statsApi, type ImportRow } from "@/api/client-stats"
+import { type ImportRow } from "@/api/client-stats"
 import { useCanSeeMoney } from "@/app/state"
 import { EntitySheet } from "@/components/common"
 import { Badge } from "@/components/ui/badge"
@@ -60,7 +61,7 @@ export function ImportSheet({ open, onClose }: { open: boolean; onClose: () => v
   const parsed = useMemo(() => parseConversions(deferred, money), [deferred, money])
   const check = useQuery({
     queryKey: ["conversions", "import-preview", parsed.rows],
-    queryFn: () => statsApi.conversions.previewImport(parsed.rows),
+    queryFn: () => api.stats.conversions.previewImport(parsed.rows),
     enabled: open && parsed.rows.length > 0,
   })
   const checks = new Map(check.data?.map((c) => [c.line, c]))
@@ -69,9 +70,9 @@ export function ImportSheet({ open, onClose }: { open: boolean; onClose: () => v
   const good = parsed.rows.filter((r) => !checks.get(r.line)?.error)
 
   const run = useMutation({
-    mutationFn: () => statsApi.conversions.importRows(good),
+    mutationFn: () => api.stats.conversions.importRows(good),
     onSuccess: (r) => {
-      for (const key of ["conversions", "report", "stats", "clicks", "audit"]) qc.invalidateQueries({ queryKey: [key] })
+      for (const key of ["conversions", "report", "stats", "clicks", "audit", "offerGroups", "problems", "names"]) qc.invalidateQueries({ queryKey: [key] })
       toast.success(`Загружено: создано ${r.created}, обновлено ${r.updated}${errors.length ? `, пропущено строк с ошибкой: ${errors.length}` : ""}`)
       setText("")
       onClose()

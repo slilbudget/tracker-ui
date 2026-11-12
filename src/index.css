@@ -1,14 +1,12 @@
 @import "tailwindcss";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/inter";
-@import "@fontsource-variable/jetbrains-mono";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme inline {
     --font-heading: var(--font-sans);
-    --font-sans: 'Inter Variable', -apple-system, 'Segoe UI', Roboto, system-ui, sans-serif;
-    --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+    --font-sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    --font-mono: Menlo, Consolas, 'Liberation Mono', monospace;
     --color-chart-5: var(--chart-5);
     --color-chart-4: var(--chart-4);
     --color-chart-3: var(--chart-3);
@@ -98,7 +96,6 @@
     button[data-variant=outline][data-size=icon] { width: 36px !important; height: 36px !important; }
   }
   .animate-spin { animation: spin 1s linear infinite !important; }
-  body { font-feature-settings: "cv11", "ss03"; }
   .num, td, th { font-variant-numeric: tabular-nums; }
 }
 
@@ -189,3 +186,9 @@
 
 tbody:last-of-type > tr:last-child > td,
 tbody:last-of-type > tr:last-child { border-bottom-width: 0; }
+
+/* Tables (owner 12/11): classic, compact — 13px text, 32px rows, IDs in mono one step smaller.
+   Unlayered on purpose: wins over the text-sm / h-9 utilities of every table in the app. */
+table, table .text-sm { font-size: 13px; line-height: 1.35; }
+table td.h-9, table th.h-9 { height: 32px; }
+table .font-mono { font-size: 12px; }

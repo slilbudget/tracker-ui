@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { EllipsisIcon, PlusIcon, RefreshCwIcon } from "lucide-react"
 import type { Domain, DomainStatus } from "@/api/types"
 import { api } from "@/api/client"
-import { catalogApi } from "@/api/client-catalog"
+
 import { useAccess, useUrlParam, useMissingRecord } from "@/app/state"
 import { Page, PageHeader, Toolbar } from "@/components/page"
 import { DataTable } from "@/components/data-table"
@@ -102,7 +102,7 @@ export default function DomainsPage() {
   })
   const remove = useMutation({
     mutationFn: async (items: Domain[]) => {
-      for (const d of items) await catalogApi.removeDomain(d.id)
+      for (const d of items) await api.catalog.removeDomain(d.id)
       return items.length
     },
     onSuccess: (n) => {

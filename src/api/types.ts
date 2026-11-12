@@ -163,10 +163,6 @@ export interface Offer {
   payout_upsell: boolean
   country: string[]
   regions: string[] // states / regions inside the countries above; empty = the whole country
-  conversion_cap_enabled: boolean
-  daily_cap: number
-  conversion_timezone: string
-  alternative_offer_id: ID | null
   notes: string
   created_at: ISODate
   updated_at: ISODate
@@ -412,16 +408,21 @@ export interface Approach { id: ID; name: string; code: string; description: str
 // ---------- Facebook entities (from the team's spend collector, matched to clicks by ad id = sub_id_6) ----------
 
 // Who gave us the account: an agency (rent, % of spend) or our own farm.
+// fee = the provider's current fee, computed by the API from AdFeePeriod (read-only).
 export interface AdProvider { id: ID; name: string; fee: number; self_made: boolean; group_name: string }
+// Provider fee from a date. account_id = null: all accounts of the provider; set: this account only (its own rows override the provider's).
+// The fee of a day = the row with the latest date_from ≤ that day; date_from = null means «from the start».
+// A raise from a date never changes the past: earlier spend keeps the old fee.
+export interface AdFeePeriod { id: ID; provider_id: ID; account_id: string | null; fee: number; date_from: string | null; comment: string; created_by: ID }
 
 export interface FbAdAccount {
   id: string // act_…
   name: string
   // current assignment, filled by the API from AdAccountAssignment (null = free account)
   buyer_id: ID | null
-  agency: string // provider name of the current assignment
-  agency_fee: number // % added to spend («Спэнд+%»)
-  provider_id: ID | null // who gave the account (default for new assignments)
+  agency: string // provider name
+  agency_fee: number // today's fee, % added to spend («Спэнд+%»); per day see AdFeePeriod
+  provider_id: ID | null // who gave the account; set once
   api_token: string // masked in lists; full value only for admins
   proxy: string
   active: boolean // false: metrics and balance are not parsed, no alerts
@@ -431,23 +432,20 @@ export interface FbAdAccount {
   created_at: ISODate // created in FB
   handed_at: ISODate // given to us (our_after)
   total_spend: number
-  spend_diff: number // spend not matched to tracker campaigns
+  spend_diff: number // spend not attributed to a tracker campaign (no valid tracker id in the FB campaign name)
   spend_offset: number // manual correction of spend_diff
   spend_diff_comment: string
   alert_on_spend_diff: number // $; above it → problem + Telegram
   fb_balance: number
   balance_checked_at: ISODate | null
   disabled_at: ISODate | null
-  watchdog_control: boolean // under auto rules
   multi_geo: boolean
 }
-// Account → buyer for a period, with the provider fee for that period.
+// Account → buyer for a period. The fee is not here: it belongs to the provider (AdFeePeriod).
 export interface AdAccountAssignment {
   id: ID
   account_id: string
   buyer_id: ID
-  provider_id: ID | null
-  provider_fee: number | null // null = provider default
   date_from: string // YYYY-MM-DD
   date_to: string | null // null = still assigned
 }
@@ -549,6 +547,9 @@ export interface User {
   last_login_at: ISODate | null
   created_at: ISODate
   two_factor: boolean
+  // Handing ad accounts to buyers, a separate permission (not part of the role):
+  // all = any account to any buyer, incl. free ones and release; team = between buyers of own team only
+  account_transfer: "none" | "team" | "all"
 }
 
 export interface ApiKey {

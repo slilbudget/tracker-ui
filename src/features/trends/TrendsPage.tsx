@@ -173,6 +173,7 @@ export default function TrendsPage() {
       </div>
 
       <DataTable
+        key={dim}
         data={report.data?.rows}
         loading={report.isLoading}
         columns={columns}

@@ -22,13 +22,20 @@ const short = (k: string) => k.split("-").reverse().slice(0, 2).join(".")
 export function PeriodSelect({ value, onChange }: { value: DateRange; onChange: (r: Pick<DateRange, "interval" | "from" | "to">) => void }) {
   const [open, setOpen] = useState(false)
   const resolved = resolveRange(value)
-  const [draft, setDraft] = useState<DayRange | undefined>({ from: fromKey(resolved.from), to: fromKey(resolved.to) })
+  const [draft, setDraft] = useState<DayRange | undefined>()
+  // «today» of the app timezone, not of the browser
+  const today = fromKey(resolveRange({ interval: "today", timezone: value.timezone }).to)
+  // each opening starts from the period that is applied now
+  const onOpenChange = (v: boolean) => {
+    if (v) setDraft({ from: fromKey(resolved.from), to: fromKey(resolved.to) })
+    setOpen(v)
+  }
   const label =
     value.interval === "custom"
       ? `${short(resolved.from)} — ${short(resolved.to)}`
       : DATE_INTERVALS.find((i) => i.value === value.interval)?.label
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         <Button variant="outline" className="min-w-40 justify-start">
           <Icon icon={CalendarIcon} className="text-muted-foreground" />
@@ -50,7 +57,7 @@ export function PeriodSelect({ value, onChange }: { value: DateRange; onChange: 
             ))}
           </div>
           <div className="p-2">
-            <Calendar mode="range" locale={ru} numberOfMonths={1} selected={draft} onSelect={setDraft} weekStartsOn={1} disabled={{ after: new Date() }} />
+            <Calendar mode="range" locale={ru} numberOfMonths={1} selected={draft} onSelect={setDraft} weekStartsOn={1} disabled={{ after: today }} />
             <div className="sticky bottom-0 flex justify-end gap-2 border-t bg-popover pt-2">
               <Button
                 disabled={!draft?.from}

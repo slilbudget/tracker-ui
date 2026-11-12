@@ -3,6 +3,7 @@ import { toast } from "sonner"
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useSearchParams } from "react-router"
 import type { AccessLevel, DateInterval, DateRange, Resource, Role } from "@/api/types"
+import { DATE_INTERVALS } from "@/api/meta"
 import { useQueryClient } from "@tanstack/react-query"
 import { roles } from "@/mock/seed"
 import { setViewerRole } from "@/mock/scope"
@@ -98,9 +99,15 @@ function patchParams(current: URLSearchParams, setParams: ReturnType<typeof useS
 export function usePeriod(defaultInterval: DateInterval = "7_days_ago", remember = true) {
   const [params, setParams] = useSearchParams()
   const { timezone } = useApp()
+  // a broken or outdated link (unknown interval, bad custom dates) falls back to the default instead of crashing
+  const day = /^\d{4}-\d{2}-\d{2}$/
   const urlInterval = params.get("period")
-  const base: PeriodPick = urlInterval
-    ? { interval: urlInterval as DateInterval, from: params.get("from") ?? undefined, to: params.get("to") ?? undefined }
+  const urlFrom = params.get("from") ?? undefined
+  const urlTo = params.get("to") ?? undefined
+  const urlOk = !!urlInterval && DATE_INTERVALS.some((d) => d.value === urlInterval) &&
+    (urlInterval !== "custom" || (!!urlFrom && !!urlTo && day.test(urlFrom) && day.test(urlTo) && urlFrom <= urlTo))
+  const base: PeriodPick = urlOk
+    ? { interval: urlInterval as DateInterval, from: urlFrom, to: urlTo }
     : (remember ? readPeriod() : null) ?? { interval: defaultInterval }
   const range: DateRange = { interval: base.interval, from: base.from, to: base.to, timezone }
   const setRange = (r: PeriodPick) => {

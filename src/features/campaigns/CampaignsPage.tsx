@@ -71,7 +71,7 @@ export default function CampaignsPage() {
     onSuccess: (_, v) => {
       qc.invalidateQueries({ queryKey: ["campaigns"] })
       qc.invalidateQueries({ queryKey: ["streams"] })
-      toast.success(v.op === "clone" ? "Кампании скопированы" : v.op === "delete" ? "Перемещено в архив" : "Готово")
+      toast.success(v.op === "clone" ? "Кампании клонированы" : v.op === "delete" ? "Перемещено в архив" : "Готово")
     },
   })
   const create = useMutation({
@@ -81,7 +81,7 @@ export default function CampaignsPage() {
         ...c, is_template: false, template_id, alias: Math.random().toString(36).slice(2, 10), state: "active", type: "weight", bind_visitors: "slo",
         cost_type: "CPC", cost_value: 0, cost_currency: "USD", cost_auto: false, traffic_loss: 0, uniqueness_method: "ip_ua",
         uniqueness_use_cookies: true, cookies_ttl: 24, token: Math.random().toString(16).slice(2, 18),
-        parameters: src ? structuredClone(src.parameters) : [], postbacks: [], notes: "", owner_id: 1,
+        parameters: src ? structuredClone(src.parameters) : [], postbacks: [], notes: "", owner_id: 0, // the API sets the owner from the session
         created_at: "", updated_at: "",
       })
       // new campaign from a reference: its streams are copied in right away
@@ -199,7 +199,7 @@ export default function CampaignsPage() {
               )
             : undefined
         }
-        empty={q || state || group || source ? "Нет кампаний по фильтрам" : "Кампаний пока нет"}
+        empty={q || state || group || source ? "Ничего не найдено по фильтрам" : "Кампаний пока нет"}
       />
 
       <NewCampaignSheet
@@ -268,7 +268,7 @@ function NewCampaignSheet({ open, onClose, domains, groups, sources, templates, 
         <Select value={template} onValueChange={setTemplate}>
           <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">Без эталона: потоки добавлю сам</SelectItem>
+            <SelectItem value="none">Без эталона: потоки настрою вручную</SelectItem>
             {templates.map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}
           </SelectContent>
         </Select>

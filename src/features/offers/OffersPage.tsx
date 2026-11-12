@@ -256,7 +256,7 @@ export default function OffersPage() {
 const EMPTY: Partial<Offer> = {
   name: "", state: "active", group_id: null, affiliate_network_id: null, offer_type: "external", action_type: "http", url: "",
   payout_type: "CPA", payout_value: 0, payout_currency: "USD", payout_auto: false, payout_upsell: false, country: [],
-  regions: [], conversion_cap_enabled: false, daily_cap: 0, conversion_timezone: "Europe/London", alternative_offer_id: null, notes: "",
+  regions: [], notes: "",
 }
 
 function OfferSheet({
@@ -291,6 +291,8 @@ function OfferSheet({
     if (!form.name?.trim()) e.name = "Введите название"
     if (!form.group_id) e.group = "Выберите оффер-группу: в ней капа и ставка"
     if (form.offer_type !== "local" && !form.url?.trim()) e.url = "Укажите адрес оффера"
+    // the mock keeps no offer files: a local offer needs its archive when it becomes local
+    if (form.offer_type === "local" && offer?.offer_type !== "local" && !zip) e.zip = "Загрузите ZIP-архив с index.html: без него оффер нечего показывать"
     setErr(e)
     if (Object.keys(e).length) return
     // a region only makes sense inside a chosen country
@@ -365,7 +367,7 @@ function OfferSheet({
             </Select>
           </FormRow>
           {form.offer_type === "local" ? (
-            <FormRow label="Архив" hint="ZIP с index.html в корне">
+            <FormRow label="Архив" hint="ZIP с index.html в корне" error={err.zip}>
               <FileDrop value={zip} onChange={setZip} />
             </FormRow>
           ) : (

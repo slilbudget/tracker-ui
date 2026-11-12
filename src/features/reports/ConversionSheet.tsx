@@ -1,10 +1,11 @@
 // Conversion side sheet (full data + status / payout change with a reason) and the bulk status dialog.
 import { useState } from "react"
+import { api } from "@/api/client"
 import { Link } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import type { Conversion, ConversionStatus } from "@/api/types"
-import { statsApi } from "@/api/client-stats"
+
 import { REJECT_REASONS, rejectReasonLabel } from "@/api/meta"
 import { useAccess, useApp, useCanSeeMoney } from "@/app/state"
 import { CopyButton, EntitySheet, FormRow } from "@/components/common"
@@ -24,7 +25,7 @@ const EDITABLE: ConversionStatus[] = ["lead", "sale", "rejected"]
 function useRefresh() {
   const qc = useQueryClient()
   return () => {
-    for (const key of ["conversions", "report", "stats", "clicks", "audit"]) qc.invalidateQueries({ queryKey: [key] })
+    for (const key of ["conversions", "report", "stats", "clicks", "audit", "offerGroups", "problems", "names"]) qc.invalidateQueries({ queryKey: [key] })
   }
 }
 
@@ -39,7 +40,7 @@ export function duration(ms: number) {
 }
 
 export function ConversionSheet({ id, onClose }: { id: string; onClose: () => void }) {
-  const q = useQuery({ queryKey: ["conversions", "one", id], queryFn: () => statsApi.conversions.get(id), enabled: !!id })
+  const q = useQuery({ queryKey: ["conversions", "one", id], queryFn: () => api.stats.conversions.get(id), enabled: !!id })
   const c = q.data
   return (
     <EntitySheet open={!!id} onOpenChange={(v) => !v && onClose()} title="Конверсия" description={`ID ${id}`} wide>
@@ -72,7 +73,7 @@ function ConversionBody({ c }: { c: Conversion }) {
   const changed = status !== c.status || payoutChanged || (status === "rejected" && rejectReason !== c.reject_reason)
 
   const save = useMutation({
-    mutationFn: () => statsApi.conversions.update([c.conversion_id], {
+    mutationFn: () => api.stats.conversions.update([c.conversion_id], {
       status, revenue: payoutChanged ? payoutNum : undefined, reject_reason: status === "rejected" ? rejectReason : undefined,
       reason: reason.trim() || (status === "rejected" ? rejectReasonLabel(rejectReason) : ""),
     }),
@@ -184,7 +185,7 @@ export function BulkStatusDialog({
   const [error, setError] = useState("")
   const reject = status === "rejected"
   const run = useMutation({
-    mutationFn: () => statsApi.conversions.update(ids, {
+    mutationFn: () => api.stats.conversions.update(ids, {
       status: status!, reject_reason: reject ? rejectReason : undefined,
       reason: reason.trim() || (reject ? rejectReasonLabel(rejectReason) : ""),
     }),

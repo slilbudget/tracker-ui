@@ -29,7 +29,8 @@ export function GroupsButton({ type }: { type: GroupType }) {
 
 function GroupsDialog({ type, open, onOpenChange }: { type: GroupType; open: boolean; onOpenChange: (v: boolean) => void }) {
   const qc = useQueryClient()
-  const { canEdit } = useAccess(RESOURCE[type])
+  // groups are shared access scopes: only full access manages them
+  const { isFull: canEdit } = useAccess(RESOURCE[type])
   const [name, setName] = useState("")
   const [toDelete, setToDelete] = useState<Group | null>(null)
   const groups = useQuery({ queryKey: ["groups", type], queryFn: () => api.groups.list(type), enabled: open })

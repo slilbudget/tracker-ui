@@ -1,12 +1,12 @@
-// «Кабинеты»: ad accounts (FB API access, money, status), their assignment to buyers by period with the provider fee,
-// and the providers (agencies / our farm). Token and proxy: admins only.
+// «Кабинеты»: ad accounts (FB API access, money, status), their assignment to buyers by period,
+// the providers (agencies / our farm) and the provider fee by period. Token and proxy: admins only.
 import { useMemo, useState } from "react"
 import { useSearchParams } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { toast } from "sonner"
-import { EyeIcon, PlusIcon } from "lucide-react"
-import type { AdProvider, FbAdAccount } from "@/api/types"
+import { EyeIcon, PlusIcon, XIcon } from "lucide-react"
+import type { AdAccountAssignment, AdFeePeriod, AdProvider, FbAdAccount, FbCampaign } from "@/api/types"
 import { TIMEZONES, CURRENCIES } from "@/api/meta"
 import { api } from "@/api/client"
 import { useAccess, useApp, useUrlParam } from "@/app/state"
@@ -41,6 +41,7 @@ const ago = (iso: string | null) => {
 }
 const pct = (v: number) => `${String(v).replace(".", ",")}%`
 const today = () => new Date().toISOString().slice(0, 10)
+const dmy = (d: string) => d.split("-").reverse().join(".")
 
 export default function AdAccountsPage() {
   const [tab, setTab] = useUrlParam("tab", "accounts")
@@ -114,7 +115,6 @@ function AccountsTab() {
     { id: "tz", header: "Часовой пояс", accessorFn: (a) => a.timezone },
     { id: "handed", header: "Передан нам", accessorFn: (a) => a.handed_at, cell: ({ row }) => formatDate(row.original.handed_at, timezone) },
     { id: "created", header: "Создан в FB", accessorFn: (a) => a.created_at, cell: ({ row }) => formatDate(row.original.created_at, timezone) },
-    { id: "watchdog", header: "Автоправила", accessorFn: (a) => (a.watchdog_control ? "да" : "нет") },
     { id: "multi_geo", header: "Мульти-гео", accessorFn: (a) => (a.multi_geo ? "да" : "нет") },
     { id: "token", header: "Токен API", accessorFn: (a) => a.api_token, cell: ({ row }) => <span className="font-mono text-muted-foreground">{row.original.api_token || "—"}</span> },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -151,7 +151,7 @@ function AccountsTab() {
         onRowClick={(a) => setEditId(a.id)}
         storageKey="ad-accounts.v1"
         initialSort={[{ id: "diff", desc: true }]}
-        initialHidden={["currency", "tz", "created", "watchdog", "multi_geo", "token"]}
+        initialHidden={["currency", "tz", "created", "multi_geo", "token"]}
         summary={{ balance: <span className="num">{fmtMoney(totals.balance)}</span>, spend: <span className="num">{fmtMoney(totals.spend)}</span>, diff: <span className="num">{fmtMoney(totals.diff)}</span> }}
         empty={filtered ? "Ничего не найдено по фильтрам" : "Кабинетов пока нет"}
         onResetFilters={filtered ? reset : undefined}
@@ -165,29 +165,30 @@ type AccountForm = Omit<FbAdAccount, "buyer_id" | "agency" | "agency_fee" | "tot
 const emptyAccount = (): AccountForm => ({
   id: "", name: "", provider_id: null, api_token: "", proxy: "", active: true, currency: "USD", timezone: "America/Los_Angeles",
   created_at: new Date().toISOString(), handed_at: new Date().toISOString(), spend_offset: 0, spend_diff_comment: "", alert_on_spend_diff: 50,
-  watchdog_control: false, multi_geo: false,
+  multi_geo: false,
 })
 
 function AccountSheet({ id, onClose, canEdit, isFull, providers, buyers }: {
-  id: string; onClose: () => void; canEdit: boolean; isFull: boolean; providers: AdProvider[]; buyers: { id: number; login: string }[]
+  id: string; onClose: () => void; canEdit: boolean; isFull: boolean; providers: AdProvider[]; buyers: { id: number; login: string; team: string }[]
 }) {
   const isNew = id === "new"
-  const data = useQuery({ queryKey: ["adAccounts", id, isFull], queryFn: () => api.adAccounts.get(id, isFull), enabled: !!id && !isNew })
+  const data = useQuery({ queryKey: ["adAccounts", id, isFull], queryFn: () => api.adAccounts.get(id), enabled: !!id && !isNew })
   const open = !!id
-  const loaded = isNew ? { account: null, assignments: [] } : data.data
+  const loaded = isNew ? { account: null, assignments: [], fees: [], unattributed: [], transfer: { can: false, release: false, team: null } } : data.data
   return (
     <EntitySheet open={open} onOpenChange={(v) => !v && onClose()} wide title={isNew ? "Новый кабинет" : loaded?.account ? `Кабинет ${loaded.account.name}` : "Кабинет"}
       description={isNew ? "Кабинет появится свободным; закрепите за байером после сохранения" : loaded?.account?.id}>
       {open && loaded && (isNew || loaded.account)
-        ? <AccountForm key={`${id}|${JSON.stringify(loaded)}`} account={loaded.account} assignments={loaded.assignments} canEdit={canEdit} isFull={isFull} providers={providers} buyers={buyers} onDone={onClose} />
+        ? <AccountForm key={id} account={loaded.account} assignments={loaded.assignments} fees={loaded.fees} unattributed={loaded.unattributed} transfer={loaded.transfer} canEdit={canEdit} isFull={isFull} providers={providers} buyers={buyers} onDone={onClose} />
         : <p className="text-sm text-muted-foreground">{data.isLoading ? "Загрузка…" : "Кабинет не найден"}</p>}
     </EntitySheet>
   )
 }
 
-function AccountForm({ account, assignments, canEdit, isFull, providers, buyers, onDone }: {
-  account: FbAdAccount | null; assignments: { id: number; buyer_id: number; provider_id: number | null; provider_fee: number | null; date_from: string; date_to: string | null }[]
-  canEdit: boolean; isFull: boolean; providers: AdProvider[]; buyers: { id: number; login: string }[]; onDone: () => void
+function AccountForm({ account, assignments, fees, unattributed, transfer, canEdit, isFull, providers, buyers, onDone }: {
+  account: FbAdAccount | null; assignments: AdAccountAssignment[]; fees: AdFeePeriod[]; unattributed: { fb_campaign: FbCampaign; spend: number }[]
+  transfer: { can: boolean; release: boolean; team: string | null }
+  canEdit: boolean; isFull: boolean; providers: AdProvider[]; buyers: { id: number; login: string; team: string }[]; onDone: () => void
 }) {
   const qc = useQueryClient()
   const { timezone } = useApp()
@@ -200,7 +201,7 @@ function AccountForm({ account, assignments, canEdit, isFull, providers, buyers,
   const save = useMutation({
     mutationFn: () => {
       // buyers may change only the comment and the alert threshold; token / proxy only admins
-      const patch: Partial<FbAdAccount> = isFull ? f : { spend_diff_comment: f.spend_diff_comment, alert_on_spend_diff: f.alert_on_spend_diff, watchdog_control: f.watchdog_control }
+      const patch: Partial<FbAdAccount> = isFull ? f : { spend_diff_comment: f.spend_diff_comment, alert_on_spend_diff: f.alert_on_spend_diff }
       return account ? api.adAccounts.update(account.id, patch) : api.adAccounts.create(f)
     },
     onSuccess: () => { refresh(); toast.success(account ? "Кабинет сохранён" : "Кабинет добавлен"); onDone() },
@@ -213,7 +214,6 @@ function AccountForm({ account, assignments, canEdit, isFull, providers, buyers,
     setErr(e)
     if (!Object.keys(e).length) save.mutate()
   }
-  const name = (pid: number | null) => providers.find((p) => p.id === pid)?.name ?? "—"
   const login = (bid: number) => buyers.find((b) => b.id === bid)?.login ?? `#${bid}`
 
   return (
@@ -226,8 +226,10 @@ function AccountForm({ account, assignments, canEdit, isFull, providers, buyers,
           <FormRow label="Название" htmlFor="acc-name" error={err.name}>
             <Input id="acc-name" value={f.name} disabled={!isFull} onChange={(e) => set("name", e.target.value)} />
           </FormRow>
-          <FormRow label="Провайдер" hint="Кто дал кабинет. Комиссия провайдера — по умолчанию для закреплений">
-            <RefSelect value={f.provider_id} onChange={(v) => set("provider_id", v)} noneLabel="Не указан" options={providers.map((p) => ({ id: p.id, name: `${p.name} · ${pct(p.fee)}${p.self_made ? " · наш фарм" : ""}` }))} />
+          <FormRow label="Провайдер" hint={account?.provider_id != null ? "Задаётся один раз, когда кабинет пришёл. Комиссия — во вкладке «Провайдеры» по периодам" : "Кто дал кабинет. Задаётся один раз"}>
+            <fieldset disabled={!isFull} className="contents">
+              <RefSelect value={f.provider_id} onChange={(v) => set("provider_id", v)} noneLabel="Не указан" options={providers.map((p) => ({ id: p.id, name: `${p.name} · ${pct(p.fee)}${p.self_made ? " · наш фарм" : ""}` }))} />
+            </fieldset>
           </FormRow>
           <div className="grid gap-x-4 sm:grid-cols-2">
             <FormRow label="Валюта">
@@ -249,7 +251,6 @@ function AccountForm({ account, assignments, canEdit, isFull, providers, buyers,
           <FormRow label="Работает" hint={f.active ? "Парсим метрики, расход и баланс, шлём алерты" : `Выключен${account?.disabled_at ? ` ${formatDateTime(account.disabled_at, timezone)}` : ""}: не парсим, алертов нет`}>
             <Switch checked={f.active} disabled={!isFull} onCheckedChange={(v) => set("active", v)} />
           </FormRow>
-          <FormRow label="Под автоправилами"><Switch checked={f.watchdog_control} onCheckedChange={(v) => set("watchdog_control", v)} /></FormRow>
           <FormRow label="Мульти-гео" hint="Кабинет льёт на несколько гео"><Switch checked={f.multi_geo} disabled={!isFull} onCheckedChange={(v) => set("multi_geo", v)} /></FormRow>
         </FormSection>
 
@@ -281,6 +282,7 @@ function AccountForm({ account, assignments, canEdit, isFull, providers, buyers,
               <Stat label="Расход всего" value={fmtMoney(account.total_spend)} />
               <Stat label="Не распределено" value={fmtMoney(account.spend_diff + f.spend_offset)} tone={account.spend_diff + f.spend_offset > f.alert_on_spend_diff ? "text-destructive" : ""} />
             </div>
+            <Unattributed list={unattributed} total={account.spend_diff} />
             <FormRow label="Поправка, $" htmlFor="acc-offset" hint="Ручная поправка к нераспределённому расходу (например, списанный долг)">
               <Input id="acc-offset" type="number" className="num w-32 text-right" disabled={!isFull} value={f.spend_offset} onChange={(e) => set("spend_offset", Number(e.target.value))} />
             </FormRow>
@@ -294,33 +296,34 @@ function AccountForm({ account, assignments, canEdit, isFull, providers, buyers,
         )}
       </fieldset>
 
+      {account && <FeesBlock account={account} fees={fees} isFull={isFull} onDone={refresh} />}
+
       {account && (
         <FormSection title="Закрепление за байерами">
-          {isFull && <AssignRow account={account} providers={providers} buyers={buyers} onDone={refresh} />}
+          {transfer.can && <AssignRow account={account} buyers={transfer.team ? buyers.filter((b) => b.team === transfer.team) : buyers} canRelease={transfer.release} onDone={refresh} />}
           <div className="overflow-x-auto rounded-md border">
             <table className="w-full text-sm">
               <thead className="text-[13px] text-muted-foreground">
                 <tr className="border-b">
                   <th className="h-9 px-2 text-left font-medium">Байер</th>
-                  <th className="h-9 px-2 text-left font-medium">Провайдер</th>
-                  <th className="h-9 px-2 text-right font-medium">Комиссия</th>
                   <th className="h-9 px-2 text-left font-medium">Период</th>
                 </tr>
               </thead>
               <tbody>
-                {assignments.length === 0 && <tr><td colSpan={4} className="h-9 px-2 text-muted-foreground">Кабинет свободен, ни за кем не закреплялся</td></tr>}
+                {assignments.length === 0 && <tr><td colSpan={2} className="h-9 px-2 text-muted-foreground">Кабинет свободен, ни за кем не закреплялся</td></tr>}
                 {assignments.map((x) => (
                   <tr key={x.id} className={cn("border-b last:border-b-0", x.date_to && "text-muted-foreground")}>
                     <td className="h-9 px-2">{login(x.buyer_id)}</td>
-                    <td className="h-9 px-2">{name(x.provider_id)}</td>
-                    <td className="num h-9 px-2 text-right">{pct(x.provider_fee ?? providers.find((p) => p.id === x.provider_id)?.fee ?? 0)}{x.provider_fee == null && <span className="text-xs text-muted-foreground"> (провайдера)</span>}</td>
-                    <td className="h-9 px-2 whitespace-nowrap">{x.date_from.split("-").reverse().join(".")} — {x.date_to ? x.date_to.split("-").reverse().join(".") : "сейчас"}</td>
+                    <td className="h-9 px-2 whitespace-nowrap">{dmy(x.date_from)} — {x.date_to ? dmy(x.date_to) : "сейчас"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="pt-1 text-xs text-muted-foreground">Расход дня относится к байеру и комиссии закрепления этого дня.</p>
+          <p className="pt-1 text-xs text-muted-foreground">
+            Расход дня относится к байеру, за которым кабинет был в этот день.{" "}
+            {transfer.can ? (transfer.team ? `Вы можете передавать кабинеты между байерами команды ${transfer.team}.` : "") : "Передавать кабинеты может админ; тимлид — между байерами своей команды, если у него есть право «Передача кабинетов»."}
+          </p>
         </FormSection>
       )}
 
@@ -344,31 +347,114 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: str
 }
 
 // «Передать байеру»: a new period from a date; the current one closes the day before.
-function AssignRow({ account, providers, buyers, onDone }: { account: FbAdAccount; providers: AdProvider[]; buyers: { id: number; login: string }[]; onDone: () => void }) {
+function AssignRow({ account, buyers, canRelease, onDone }: { account: FbAdAccount; buyers: { id: number; login: string; team: string }[]; canRelease: boolean; onDone: () => void }) {
   const [buyer, setBuyer] = useState<number | null>(null)
-  const [provider, setProvider] = useState<number | null>(account.provider_id)
-  const [fee, setFee] = useState("")
   const [from, setFrom] = useState(today())
-  const def = providers.find((p) => p.id === provider)?.fee ?? 0
   const assign = useMutation({
-    mutationFn: () => api.adAccounts.assign({ account_id: account.id, buyer_id: buyer!, provider_id: provider, provider_fee: fee === "" ? null : Number(fee), date_from: from }),
+    mutationFn: () => api.adAccounts.assign({ account_id: account.id, buyer_id: buyer!, date_from: from }),
     onSuccess: () => { onDone(); toast.success("Кабинет закреплён") },
     onError: (e: Error) => toast.error(e.message),
   })
-  const release = useMutation({ mutationFn: () => api.adAccounts.release(account.id), onSuccess: () => { onDone(); toast.success("Кабинет свободен с сегодняшнего дня") } })
+  const release = useMutation({
+    mutationFn: () => api.adAccounts.release(account.id),
+    onSuccess: () => { onDone(); toast.success("Кабинет свободен с сегодняшнего дня") },
+    onError: (e: Error) => toast.error(e.message),
+  })
   return (
     <div className="mb-2 flex flex-col gap-2 rounded-md border p-2">
       <div className="text-xs text-muted-foreground">{account.buyer_id == null ? "Закрепить за байером" : "Передать другому байеру"}</div>
-      <div className="grid gap-2 sm:grid-cols-[1fr_1fr_6rem_10rem]">
+      <div className="grid gap-2 sm:grid-cols-[1fr_10rem]">
         <RefSelect value={buyer} onChange={setBuyer} noneLabel="Байер" options={buyers.filter((b) => b.id !== account.buyer_id).map((b) => ({ id: b.id, name: b.login }))} />
-        <RefSelect value={provider} onChange={setProvider} noneLabel="Провайдер" options={providers.map((p) => ({ id: p.id, name: p.name }))} />
-        <Input type="number" min={0} step={0.5} className="num text-right" placeholder={`${def}%`} value={fee} onChange={(e) => setFee(e.target.value)} aria-label="Комиссия, %" />
         <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="С даты" />
       </div>
       <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" disabled={!buyer || !from || assign.isPending} onClick={() => assign.mutate()}>Закрепить с {from.split("-").reverse().join(".")}</Button>
-        {account.buyer_id != null && <Button type="button" variant="ghost" onClick={() => release.mutate()}>Освободить кабинет</Button>}
+        <Button type="button" variant="outline" disabled={!buyer || !from || assign.isPending} onClick={() => assign.mutate()}>Закрепить с {dmy(from)}</Button>
+        {canRelease && account.buyer_id != null && <Button type="button" variant="ghost" onClick={() => release.mutate()}>Освободить кабинет</Button>}
       </div>
+    </div>
+  )
+}
+
+// Spend no tracker campaign took: FB campaigns without a valid tracker id in the name.
+function Unattributed({ list, total }: { list: { fb_campaign: FbCampaign; spend: number }[]; total: number }) {
+  if (total <= 0) return null
+  const named = list.reduce((s, x) => s + x.spend, 0)
+  return (
+    <div className="mb-2 rounded-md border p-2 text-sm">
+      <div className="mb-1 text-xs text-muted-foreground">Откуда нераспределённый расход</div>
+      <ul className="flex flex-col gap-1">
+        {list.map((x) => (
+          <li key={x.fb_campaign.id} className="flex gap-2">
+            <span className="min-w-0 flex-1 break-all">{x.fb_campaign.name}<span className="text-muted-foreground"> — нет ID кампании трекера в начале названия</span></span>
+            <span className="num shrink-0">{fmtMoney(x.spend)}</span>
+          </li>
+        ))}
+        {total - named > 0.005 && (
+          <li className="flex gap-2"><span className="min-w-0 flex-1 text-muted-foreground">Расход вне кампаний, которые видит сборщик (например, запуск без ссылки трекера)</span><span className="num shrink-0">{fmtMoney(total - named)}</span></li>
+        )}
+      </ul>
+    </div>
+  )
+}
+
+// Fee of this account by period: the provider's rows and the account's own; admins add «своя комиссия с даты».
+function FeesBlock({ account, fees, isFull, onDone }: { account: FbAdAccount; fees: AdFeePeriod[]; isFull: boolean; onDone: () => void }) {
+  const [fee, setFee] = useState("")
+  const [from, setFrom] = useState(today())
+  const add = useMutation({
+    mutationFn: () => api.adAccounts.fees.create({ provider_id: account.provider_id!, account_id: account.id, fee: Number(fee), date_from: from, comment: "Своя комиссия кабинета" }),
+    onSuccess: () => { onDone(); setFee(""); toast.success("Комиссия кабинета сохранена") },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  return (
+    <FormSection title={`Комиссия · сейчас ${pct(account.agency_fee)}`}>
+      {account.provider_id == null
+        ? <p className="text-sm text-muted-foreground">Провайдер не указан — комиссия 0%.</p>
+        : <FeeTable rows={fees} showAccount={false} />}
+      {isFull && account.provider_id != null && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Своя комиссия этого кабинета</span>
+          <Input type="number" min={0} step={0.5} className="num w-24 text-right" placeholder="%" value={fee} onChange={(e) => setFee(e.target.value)} aria-label="Комиссия кабинета, %" />
+          <Input type="date" className="w-40" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="С даты" />
+          <Button type="button" variant="outline" disabled={fee === "" || Number(fee) < 0 || Number(fee) > 100 || add.isPending} onClick={() => add.mutate()}>Добавить</Button>
+        </div>
+      )}
+      <p className="pt-1 text-xs text-muted-foreground">Расход дня считается с комиссией, действовавшей в этот день. Новая комиссия не меняет прошлый расход.</p>
+    </FormSection>
+  )
+}
+
+function FeeTable({ rows, showAccount, providers, onRemove }: { rows: AdFeePeriod[]; showAccount: boolean; providers?: AdProvider[]; onRemove?: (id: number) => void }) {
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <table className="w-full text-sm">
+        <thead className="text-[13px] text-muted-foreground">
+          <tr className="border-b">
+            {showAccount && <th className="h-9 px-2 text-left font-medium">Провайдер</th>}
+            <th className="h-9 px-2 text-left font-medium">Кабинеты</th>
+            <th className="h-9 px-2 text-right font-medium">Комиссия</th>
+            <th className="h-9 px-2 text-left font-medium">С даты</th>
+            <th className="h-9 px-2 text-left font-medium">Комментарий</th>
+            {onRemove && <th className="h-9 w-10" />}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((x) => (
+            <tr key={x.id} className="border-b last:border-b-0">
+              {showAccount && <td className="h-9 px-2">{providers?.find((p) => p.id === x.provider_id)?.name ?? "—"}</td>}
+              <td className="h-9 px-2">{x.account_id ? <span className="font-mono">{x.account_id}</span> : "все кабинеты провайдера"}</td>
+              <td className="num h-9 px-2 text-right">{pct(x.fee)}</td>
+              <td className="h-9 px-2 whitespace-nowrap">{x.date_from ? dmy(x.date_from) : "с начала"}</td>
+              <td className="h-9 px-2 text-muted-foreground">{x.comment || "—"}</td>
+              {onRemove && (
+                <td className="h-9 px-2 text-right">
+                  {(x.date_from != null || x.account_id != null) && <Button type="button" variant="ghost" size="icon-sm" aria-label="Удалить строку комиссии" onClick={() => onRemove(x.id)}><Icon icon={XIcon} size={14} /></Button>}
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -378,11 +464,14 @@ function AssignRow({ account, providers, buyers, onDone }: { account: FbAdAccoun
 function ProvidersTab({ canEdit }: { canEdit: boolean }) {
   const qc = useQueryClient()
   const list = useQuery({ queryKey: ["adProviders"], queryFn: api.adAccounts.providers.list })
+  const fees = useQuery({ queryKey: ["adFees"], queryFn: api.adAccounts.fees.list })
   const accounts = useQuery({ queryKey: ["adAccounts"], queryFn: api.adAccounts.list })
+  const refresh = () => { ["adProviders", "adFees", "adAccounts", "report"].forEach((k) => qc.invalidateQueries({ queryKey: [k] })) }
   const add = useMutation({
     mutationFn: () => api.adAccounts.providers.create({ name: "Новый провайдер", fee: 0, self_made: false, group_name: "" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["adProviders"] }),
+    onSuccess: refresh,
   })
+  const remove = useMutation({ mutationFn: (id: number) => api.adAccounts.fees.remove(id), onSuccess: () => { refresh(); toast.success("Строка удалена") }, onError: (e: Error) => toast.error(e.message) })
   return (
     <div className="flex flex-col gap-2">
       {canEdit && <Button className="self-start" onClick={() => add.mutate()}><Icon icon={PlusIcon} size={14} /> Добавить провайдера</Button>}
@@ -392,7 +481,7 @@ function ProvidersTab({ canEdit }: { canEdit: boolean }) {
             <tr className="border-b">
               <th className="h-9 px-3 text-left font-medium">Название</th>
               <th className="h-9 px-3 text-left font-medium">Группа</th>
-              <th className="h-9 px-3 text-right font-medium">Комиссия, %</th>
+              <th className="h-9 px-3 text-right font-medium">Комиссия сейчас</th>
               <th className="h-9 px-3 text-left font-medium">Наш фарм</th>
               <th className="h-9 px-3 text-right font-medium">Кабинетов</th>
               <th className="h-9 w-24" />
@@ -400,29 +489,66 @@ function ProvidersTab({ canEdit }: { canEdit: boolean }) {
           </thead>
           <tbody>
             {list.data?.map((p) => (
-              <ProviderRow key={`${p.id}|${JSON.stringify(p)}`} p={p} canEdit={canEdit} count={(accounts.data ?? []).filter((a) => a.provider_id === p.id).length} />
+              <ProviderRow key={`${p.id}|${JSON.stringify(p)}`} p={p} canEdit={canEdit} count={(accounts.data ?? []).filter((a) => a.provider_id === p.id).length} onDone={refresh} />
             ))}
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-muted-foreground">Комиссия провайдера подставляется в новые закрепления; у закрепления можно задать свою.</p>
+
+      <h2 className="mt-4 text-base font-medium">Комиссия по периодам</h2>
+      {canEdit && <FeeAdd providers={list.data ?? []} accounts={accounts.data ?? []} onDone={refresh} />}
+      <FeeTable rows={fees.data ?? []} showAccount providers={list.data} onRemove={canEdit ? (id) => remove.mutate(id) : undefined} />
+      <p className="text-xs text-muted-foreground">Комиссия дня = последняя строка с датой не позже этого дня; если у кабинета есть своя комиссия, берётся она, а не комиссия провайдера. Поднятие комиссии с даты не меняет прошлый расход.</p>
     </div>
   )
 }
 
-function ProviderRow({ p, canEdit, count }: { p: AdProvider; canEdit: boolean; count: number }) {
-  const qc = useQueryClient()
-  const [v, setV] = useState(p)
-  const dirty = JSON.stringify(v) !== JSON.stringify(p)
+function FeeAdd({ providers, accounts, onDone }: { providers: AdProvider[]; accounts: FbAdAccount[]; onDone: () => void }) {
+  const [provider, setProvider] = useState<number | null>(null)
+  const [account, setAccount] = useState("all")
+  const [fee, setFee] = useState("")
+  const [from, setFrom] = useState(today())
+  const [comment, setComment] = useState("")
+  const add = useMutation({
+    mutationFn: () => api.adAccounts.fees.create({ provider_id: provider!, account_id: account === "all" ? null : account, fee: Number(fee), date_from: from, comment: comment.trim() }),
+    onSuccess: () => { onDone(); setFee(""); setComment(""); toast.success("Комиссия добавлена") },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  return (
+    <div className="flex flex-col gap-2 rounded-md border p-2">
+      <div className="text-xs text-muted-foreground">Новая комиссия с даты</div>
+      <div className="grid gap-2 sm:grid-cols-[1fr_1fr_6rem_10rem]">
+        <RefSelect value={provider} onChange={(v) => { setProvider(v); setAccount("all") }} noneLabel="Провайдер" options={providers.map((p) => ({ id: p.id, name: `${p.name} · сейчас ${pct(p.fee)}` }))} />
+        <Select value={account} onValueChange={setAccount} disabled={provider == null}>
+          <SelectTrigger className="w-full" aria-label="Кабинеты"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Все кабинеты провайдера</SelectItem>
+            {accounts.filter((a) => a.provider_id === provider).map((a) => <SelectItem key={a.id} value={a.id}>{a.name} · {a.id}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Input type="number" min={0} step={0.5} className="num text-right" placeholder="%" value={fee} onChange={(e) => setFee(e.target.value)} aria-label="Комиссия, %" />
+        <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-label="С даты" />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Input className="min-w-0 flex-1" placeholder="Комментарий (необязательно)" value={comment} onChange={(e) => setComment(e.target.value)} aria-label="Комментарий" />
+        <Button type="button" variant="outline" disabled={provider == null || fee === "" || Number(fee) < 0 || Number(fee) > 100 || !from || add.isPending} onClick={() => add.mutate()}>Добавить с {dmy(from)}</Button>
+      </div>
+    </div>
+  )
+}
+
+function ProviderRow({ p, canEdit, count, onDone }: { p: AdProvider; canEdit: boolean; count: number; onDone: () => void }) {
+  const [v, setV] = useState({ name: p.name, group_name: p.group_name, self_made: p.self_made })
+  const dirty = v.name !== p.name || v.group_name !== p.group_name || v.self_made !== p.self_made
   const save = useMutation({
     mutationFn: () => api.adAccounts.providers.update(p.id, v),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["adProviders"] }); qc.invalidateQueries({ queryKey: ["adAccounts"] }); toast.success("Провайдер сохранён") },
+    onSuccess: () => { onDone(); toast.success("Провайдер сохранён") },
   })
   return (
     <tr className="border-b last:border-b-0">
       <td className="px-3 py-1.5"><Input disabled={!canEdit} className="min-w-36" value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} aria-label="Название провайдера" /></td>
       <td className="px-3 py-1.5"><Input disabled={!canEdit} className="min-w-32" value={v.group_name} onChange={(e) => setV({ ...v, group_name: e.target.value })} aria-label="Группа" /></td>
-      <td className="px-3 py-1.5"><Input disabled={!canEdit} type="number" min={0} step={0.5} className="num ml-auto w-24 text-right" value={v.fee} onChange={(e) => setV({ ...v, fee: Number(e.target.value) })} aria-label="Комиссия" /></td>
+      <td className="num px-3 py-1.5 text-right">{pct(p.fee)}</td>
       <td className="px-3 py-1.5"><Switch disabled={!canEdit} checked={v.self_made} onCheckedChange={(x) => setV({ ...v, self_made: x })} aria-label="Наш фарм" /></td>
       <td className="num px-3 py-1.5 text-right">{count}</td>
       <td className="px-3 py-1.5 text-right">{dirty && <Button size="sm" disabled={!v.name.trim() || save.isPending} onClick={() => save.mutate()}>Сохранить</Button>}</td>

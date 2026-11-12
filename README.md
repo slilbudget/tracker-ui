@@ -1,12 +1,44 @@
 # Tracker UI
 
-Frontend prototype of the team's own click tracker (Keitaro analogue). Mock API in the browser, no backend.
-Stack: React 19, TypeScript, Vite, Tailwind v4, shadcn (radix), TanStack Query / Table, react-router (hash), recharts.
+Frontend prototype of an in-house ad click tracker (a Keitaro analogue) for a media-buying team: campaigns and streams, offers with caps, landings, traffic sources, postbacks, reports, Facebook ad accounts, problems monitoring. Russian UI.
 
-- `npm run dev` — dev server
-- `npm run build` — typecheck + build into `dist/`
-- `npm run lint` — oxlint
-- Live demo: https://tracker-ui.lowiedollekamp-28f.workers.dev (static build, any static hosting works: `dist/` + SPA fallback to `index.html`)
+There is **no backend yet**: the app runs on a fake API inside the browser (`src/api` over `src/mock`). The API contract, the domain model and the business rules are written down so the backend can be built from this repo:
 
-Layout: `src/features/<section>` — pages; `src/components` — shared blocks and shadcn `ui/`; `src/api` — types (the contract for the backend) and the in-browser fake server `client.ts`; `src/mock` — seed data, report math, access scope; `src/app` — shell, router, app state.
-Design rules: [CONVENTIONS.md](CONVENTIONS.md).
+- [docs/backend.md](docs/backend.md) — what to build: endpoints, conventions, what the mock simplifies
+- [docs/domain.md](docs/domain.md) — business rules
+- [CONVENTIONS.md](CONVENTIONS.md) — frontend structure and design rules
+
+Live demo: https://tracker-ui.lowiedollekamp-28f.workers.dev
+
+## Run
+
+Node 22+.
+
+```bash
+npm ci
+npm run dev        # http://localhost:5173
+npm run build      # typecheck + production build into dist/
+npm run lint
+```
+
+`dist/` is static: any static hosting works (hash routing, no server rewrites needed).
+
+## Demo controls (user menu, top right)
+
+- **Смотреть как роль** — see the tracker as a team lead, buyer, finance or intern (permissions demo).
+- **Данные** — «Демо-данные» (a generated company with 45 days of traffic and planted problems) or «Пустой трекер» (a fresh install: admin, roles and settings only). Data lives in memory and resets on reload.
+- **Справка для IT** — business rules per feature; «Пометки для IT на страницах» shows them next to the features.
+
+## Layout
+
+```
+src/
+  api/        types.ts (domain model), meta.ts (dictionaries), client.ts (the `api` object = contract), client-*.ts (its groups), mock-util.ts
+  mock/       seed.ts (demo data), report.ts (report math), scope.ts (who sees what) — fake backend
+  app/        shell, router, app state (period, permissions, URL params)
+  components/ shared blocks; components/ui = shadcn
+  features/   one folder per section
+  lib/        dates, number formats
+```
+
+Stack: React 19, TypeScript, Vite, Tailwind CSS v4, shadcn/ui (Radix), TanStack Query and Table, react-router (hash), recharts.

@@ -2,8 +2,10 @@
 // each function is one backend endpoint; swap the bodies for fetch() later.
 import type { ID } from "./types"
 import * as db from "@/mock/seed"
+import { wait as mockWait } from "./mock-util"
 
-const wait = <T,>(v: T, ms = 300): Promise<T> => new Promise((res) => setTimeout(() => res(structuredClone(v)), ms))
+// file operations answer slower than the rest (an upload / unpack in the real API)
+const wait = <T,>(v: T, ms = 300) => mockWait(v, ms)
 
 interface ZipInfo { name: string; size: number }
 interface LandingFile { path: string; size: number }

@@ -1,9 +1,9 @@
 {
-  // Static hosting of the tracker UI prototype (Workers static assets, free). Deploy: see .notes/index.md
+  // Optional: static hosting on Cloudflare Workers assets (`npx wrangler deploy` after `npm run build`, directory below).
   "name": "tracker-ui",
   "compatibility_date": "2026-10-01",
   "assets": {
-    "directory": "./dist-live",
+    "directory": "./dist",
     "not_found_handling": "single-page-application"
   }
 }

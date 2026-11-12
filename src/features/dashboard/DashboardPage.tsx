@@ -178,7 +178,7 @@ function Mini({ head, rows, loading, right = [] }: { head: string[]; rows: React
             </tr>
           ))}
           {!rows.length && (
-            <tr><td colSpan={head.length} className="h-16 text-center text-muted-foreground">{loading ? "Загрузка…" : "Пока ничего нет"}</td></tr>
+            <tr><td colSpan={head.length} className="h-16 text-center text-muted-foreground">{loading ? "Загрузка…" : "Нет данных за период"}</td></tr>
           )}
         </tbody>
       </table>

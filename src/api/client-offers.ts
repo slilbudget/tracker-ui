@@ -6,15 +6,11 @@ import type {
 import * as db from "@/mock/seed"
 import { canSeeCampaign } from "@/mock/scope"
 import { statsBy } from "@/mock/report"
+import { audit, nextId, now, wait } from "./mock-util"
 
-const wait = <T,>(v: T, ms = 30): Promise<T> => new Promise((res) => setTimeout(() => res(structuredClone(v)), ms))
-const now = () => new Date().toISOString()
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-const nextId = (xs: { id: number }[]) => Math.max(0, ...xs.map((x) => x.id)) + 1
 
-function log(summary: string, resource: "offers" | "campaigns" | "streams", resource_id: ID | null) {
-  db.audit.unshift({ id: nextId(db.audit), datetime: now(), user_id: db.CURRENT_USER_ID, action: "update", resource, resource_id, summary, ip: "127.0.0.1" })
-}
+const log = (summary: string, resource: "offers" | "campaigns" | "streams", resource_id: ID | null) => audit(resource, summary, resource_id)
 
 // ---------- caps ----------
 
@@ -35,7 +31,9 @@ export function capOf(g: OfferGroup): OfferGroupCap {
     return { ...c, done }
   })
   const pct = caps.reduce((m, c) => Math.max(m, c.value ? (c.done / c.value) * 100 : 0), 0)
-  const warnAt = Math.min(...g.alert_at.filter((x) => x < 100), 80)
+  // «warn» from the lowest alert threshold below 100% (80% when none is set)
+  const below = g.alert_at.filter((x) => x < 100)
+  const warnAt = below.length ? Math.min(...below) : 80
   const status = !caps.length ? "none" : pct >= 100 ? "full" : pct >= warnAt ? "warn" : "ok"
   return { term, caps, pct, status }
 }
@@ -48,7 +46,7 @@ interface SwapRecord {
 }
 // two earlier replacements for the history (no snapshot: too old to undo)
 const general = db.offers.filter((o) => !o.regions.length && o.country.includes("US"))
-const swaps: SwapRecord[] = [
+const swaps: SwapRecord[] = general.length < 8 ? [] : [
   { id: 2, datetime: new Date(Date.now() - 26 * 3600000).toISOString(), user_id: 2, from_offer_id: general[1].id, to_offer_id: general[4].id, streams: 7, campaigns: 6, undone: false, snapshot: [] },
   { id: 1, datetime: new Date(Date.now() - 74 * 3600000).toISOString(), user_id: 1, from_offer_id: general[7].id, to_offer_id: null, streams: 4, campaigns: 4, undone: false, snapshot: [] },
 ]
@@ -58,7 +56,8 @@ const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((
 function swapRows(q: OfferSwapRequest): OfferSwapRow[] {
   const from = db.offers.find((o) => o.id === q.from_offer_id)
   const to = q.to_offer_id != null ? db.offers.find((o) => o.id === q.to_offer_id) : null
-  if (!from) return []
+  // the same offer, or a target that does not exist / is archived: nothing to replace
+  if (!from || q.to_offer_id === from.id || (q.to_offer_id != null && (!to || to.state === "deleted"))) return []
   const live = new Set(db.campaigns.filter((c) => c.state !== "deleted" && canSeeCampaign(c.id)).map((c) => c.id))
   return db.streams
     .filter((s) => s.state !== "deleted" && live.has(s.campaign_id) && s.offers.some((x) => x.offer_id === from.id))
@@ -136,6 +135,7 @@ export const offersApi = {
       return wait({ streams: rows.length, campaigns: new Set(rows.map((r) => r.campaign_id)).size })
     },
     apply: (q: OfferSwapRequest) => {
+      if (q.to_offer_id === q.from_offer_id) return Promise.reject(new Error("Оффер нельзя заменить им же"))
       const rows = swapRows(q)
       const rec: SwapRecord = {
         id: nextId(swaps), datetime: now(), user_id: db.CURRENT_USER_ID, from_offer_id: q.from_offer_id, to_offer_id: q.to_offer_id,

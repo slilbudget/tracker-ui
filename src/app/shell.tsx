@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { ChevronDownIcon, MenuIcon, SearchIcon, TriangleAlertIcon, UserIcon } from "lucide-react"
 import type { Resource } from "@/api/types"
 import { api } from "@/api/client"
-import { roles } from "@/mock/seed"
+import { EMPTY_DB, roles } from "@/mock/seed"
 import { cn } from "@/lib/utils"
 import { useApp } from "@/app/state"
 import { Button } from "@/components/ui/button"
@@ -196,6 +196,14 @@ export function Shell() {
 
       <GlobalSearch open={search} onOpenChange={setSearch} />
 
+      {EMPTY_DB && (
+        <div className="bg-muted">
+          <div className="mx-auto flex max-w-[1800px] flex-wrap items-center gap-2 px-4 py-1.5 text-sm md:px-6">
+            <span>Пустой трекер: так он выглядит после установки. Без бэкенда всё созданное живёт до перезагрузки страницы.</span>
+            <Button size="sm" variant="outline" className="ml-auto" onClick={() => setDataMode("demo")}>Вернуть демо-данные</Button>
+          </div>
+        </div>
+      )}
       {role.id !== 1 && (
         <div className="bg-muted">
           <div className="mx-auto flex max-w-[1800px] flex-wrap items-center gap-2 px-4 py-1.5 text-sm md:px-6">
@@ -220,6 +228,12 @@ export function Shell() {
   )
 }
 
+// Demo data or a clean database: the mock builds its data once at load, so switching reloads the page.
+function setDataMode(mode: "demo" | "empty") {
+  try { localStorage.setItem("trk.data", mode) } catch { /* private mode */ }
+  location.reload()
+}
+
 function UserMenu() {
   const { role, setRoleId } = useApp()
   const devNotes = useDevNotes()
@@ -241,6 +255,12 @@ function UserMenu() {
         <DropdownMenuLabel className="text-xs text-muted-foreground">Смотреть как роль (демо прав)</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={String(role.id)} onValueChange={(v) => setRoleId(Number(v))}>
           {roles.map((r) => <DropdownMenuRadioItem key={r.id} value={String(r.id)}>{r.name}</DropdownMenuRadioItem>)}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs text-muted-foreground">Данные</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={EMPTY_DB ? "empty" : "demo"} onValueChange={(v) => setDataMode(v as "demo" | "empty")}>
+          <DropdownMenuRadioItem value="demo">Демо-данные</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="empty">Пустой трекер</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled>Выйти</DropdownMenuItem>

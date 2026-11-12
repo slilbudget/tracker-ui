@@ -101,7 +101,7 @@ export function StreamsTab({
       (!onlyLive || (s.state === "active" && (s.type !== "regular" || weightOf(s) > 0))),
   )
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["streams", campaign.id] })
+  const invalidate = () => { qc.invalidateQueries({ queryKey: ["streams"] }); qc.invalidateQueries({ queryKey: ["archive"] }) }
   const saveWeights = useMutation({
     mutationFn: () => api.streams.setWeights(dirty.map(([id, w]) => ({ id: Number(id), weight: w }))),
     onSuccess: () => { invalidate(); setDraft({}); toast.success("Веса сохранены") },
@@ -264,7 +264,7 @@ export function StreamsTab({
                       <td className="w-full max-w-0 min-w-[180px] px-2.5">
                         <button type="button" className="flex w-full min-w-0 items-center gap-2 text-left" onClick={() => setOpenId(String(s.id))} title={`${s.name} · #${s.id}`}>
                           <StateDot state={s.state} />
-                          <span className="truncate font-medium text-foreground">{s.name}</span>
+                          <span className="truncate text-foreground">{s.name}</span>
                           {problems.length > 0 && (
                             <Tooltip>
                               <TooltipTrigger asChild><span className="text-warning"><Icon icon={TriangleAlertIcon} size={14} /></span></TooltipTrigger>
@@ -304,7 +304,7 @@ export function StreamsTab({
                             <DropdownMenuContent align="end" className="min-w-44">
                               <DropdownMenuItem onClick={() => setOpenId(String(s.id))}>{canEdit ? "Изменить" : "Открыть"}</DropdownMenuItem>
                               <DropdownMenuItem onClick={() => nav(`/reports?f_stream=${encodeURIComponent(s.name)}&g=landing,offer`)}>Отчёт по потоку</DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => nav(`/clicks?f_stream=${encodeURIComponent(s.name)}`)}>Лог кликов</DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => nav(`/clicks?c=${s.campaign_id}&f=${encodeURIComponent(JSON.stringify([{ name: "stream_id", operator: "EQUALS", expression: String(s.id) }]))}`)}>Лог кликов</DropdownMenuItem>
                               {canEdit && (
                                 <>
                                   <DropdownMenuItem onClick={() => patch.mutate({ ids: [s.id], p: { state: s.state === "active" ? "disabled" : "active" } })}>

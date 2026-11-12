@@ -34,8 +34,13 @@ import { StreamsTab, dropWeightDraft, hasWeightDraft } from "./StreamsTab"
 
 const PARAM_NAMES = ["keyword", "cost", "currency", "external_id", "creative_id", "ad_campaign_id", "source", ...Array.from({ length: 30 }, (_, i) => `sub_id_${i + 1}`)]
 
-export default function CampaignPage() {
+// Keyed by id: moving to another campaign starts with fresh stream selection, drafts and sheets.
+export default function CampaignRoute() {
   const { id } = useParams()
+  return <CampaignPage key={id} id={id} />
+}
+
+function CampaignPage({ id }: { id: string | undefined }) {
   const cid = Number(id)
   const qc = useQueryClient()
   const nav = useNavigate()
@@ -63,10 +68,15 @@ export default function CampaignPage() {
   }
   const importStreams = async (file: File) => {
     try {
-      const rows = JSON.parse(await file.text()) as Omit<Stream, "id" | "campaign_id">[]
-      if (!Array.isArray(rows)) throw new Error()
-      for (const r of rows) await api.streams.create({ ...r, campaign_id: cid, weight: 0, updated_at: new Date().toISOString() } as Omit<Stream, "id">)
-      qc.invalidateQueries({ queryKey: ["streams", cid] })
+      const rows = JSON.parse(await file.text()) as Partial<Stream>[]
+      const ok = (r: Partial<Stream>) => typeof r.name === "string" && ["regular", "forced", "default"].includes(r.type ?? "") &&
+        Array.isArray(r.filters) && Array.isArray(r.landings) && Array.isArray(r.offers)
+      if (!Array.isArray(rows) || !rows.length || !rows.every(ok)) throw new Error()
+      const have = (await api.streams.byCampaign(cid)).length
+      for (const [i, r] of rows.entries()) {
+        await api.streams.create({ ...r, campaign_id: cid, weight: 0, position: have + i, updated_at: new Date().toISOString() } as Omit<Stream, "id">)
+      }
+      qc.invalidateQueries({ queryKey: ["streams"] })
       toast.success(`Импортировано потоков: ${rows.length}. Веса выставлены в 0, проверьте и включите нужные`)
     } catch {
       toast.error("Файл не похож на выгрузку потоков: нужен JSON-массив потоков из «Экспорт потоков»")
@@ -91,8 +101,20 @@ export default function CampaignPage() {
     return () => window.removeEventListener("beforeunload", h)
   }, [dirty])
 
+  // what makes the link or the routing broken; the API checks the same
+  const invalid = (c: Campaign) =>
+    !c.name.trim() ? "Введите название кампании"
+    : !c.alias.trim() ? "Введите идентификатор: без него у кампании нет ссылки"
+    : allCampaigns.data?.some((x) => x.id !== c.id && x.alias === c.alias) ? `Идентификатор «${c.alias}» уже занят другой кампанией`
+    : !(c.cookies_ttl >= 1 && c.cookies_ttl <= 8760) ? "Срок уникальности — от 1 до 8760 часов"
+    : !(c.traffic_loss >= 0 && c.traffic_loss <= 99) ? "Потери трафика — от 0 до 99%"
+    : ""
   const save = useMutation({
-    mutationFn: (c: Campaign) => api.campaigns.update(c.id, c),
+    mutationFn: (c: Campaign) => {
+      const err = invalid(c)
+      return err ? Promise.reject(new Error(err)) : api.campaigns.update(c.id, c)
+    },
+    onError: (e: Error) => toast.error(e.message),
     onSuccess: (c) => {
       qc.setQueryData(["campaigns", cid], c)
       qc.invalidateQueries({ queryKey: ["campaigns"] })
@@ -102,14 +124,14 @@ export default function CampaignPage() {
   })
   const clone = useMutation({
     mutationFn: () => api.campaigns.clone(cid),
-    onSuccess: (c) => { qc.invalidateQueries({ queryKey: ["campaigns"] }); toast.success("Кампания скопирована вместе с потоками"); nav(`/campaigns/${c.id}?tab=settings`) },
+    onSuccess: (c) => { qc.invalidateQueries({ queryKey: ["campaigns"] }); toast.success("Кампания клонирована вместе с потоками"); nav(`/campaigns/${c.id}?tab=settings`) },
   })
   const archive = useMutation({
     mutationFn: () => api.campaigns.remove(cid),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["campaigns"] }); toast.success("Кампания в архиве"); nav("/campaigns") },
   })
 
-  if (campaign.isError) {
+  if (campaign.isError || campaign.data?.state === "deleted") {
     return (
       <Page className="items-center py-24 text-center">
         <p className="text-sm">Кампания #{id} не найдена или в архиве</p>
@@ -160,8 +182,8 @@ export default function CampaignPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-44">
               <DropdownMenuItem onClick={() => nav(`/reports?f_campaign=${encodeURIComponent(form.name)}&g=stream`)}>Отчёт по кампании</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => nav(`/clicks?f_campaign=${encodeURIComponent(form.name)}`)}>Лог кликов</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => nav(`/conversions?campaign=${form.id}`)}>Лог конверсий</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => nav(`/clicks?c=${form.id}`)}>Лог кликов</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => nav(`/conversions?c=${form.id}`)}>Лог конверсий</DropdownMenuItem>
               {canEdit && (
                 <>
                   <DropdownMenuItem onClick={() => setCosts(true)}>Обновить расходы</DropdownMenuItem>

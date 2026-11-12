@@ -362,7 +362,7 @@ export function DataTable<T>({
                         <Button variant="ghost" onClick={onResetFilters}>Сбросить фильтры</Button>
                       </>
                     ) : (
-                      empty ?? "Нет данных за выбранный период"
+                      empty ?? "Нет данных за период"
                     )}
                   </div>
                 </td>

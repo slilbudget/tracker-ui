@@ -6,8 +6,8 @@ import * as db from "@/mock/seed"
 import { canSeeCampaign } from "@/mock/scope"
 import { capOf } from "./client-offers"
 import { approachIndex, currentAdNaming } from "./client-directory"
+import { wait } from "./mock-util"
 
-const wait = <T,>(v: T, ms = 30): Promise<T> => new Promise((res) => setTimeout(() => res(structuredClone(v)), ms))
 const H = 3600000
 const ago = (iso: string) => Date.now() - new Date(iso).getTime()
 const hours = (ms: number) => (ms < H ? `${Math.max(1, Math.round(ms / 60000))} мин` : `${Math.round(ms / H)} ч`)
@@ -205,14 +205,27 @@ function caps(): Problem[] {
   for (const g of db.offerGroups.filter((x) => x.state === "active")) {
     const cap = capOf(g)
     const href = `#/offer-groups?edit=${g.id}`
-    if (cap.status === "full" && !g.fallback_offer_ids.length) {
+    // a fallback helps only while it is active and its own group still has room
+    const fallbackFree = g.fallback_offer_ids.some((oid) => {
+      const o = db.offers.find((x) => x.id === oid)
+      const fg = o?.group_id != null ? db.offerGroups.find((x) => x.id === o.group_id) : null
+      return !!o && o.state === "active" && (!fg || capOf(fg).status !== "full")
+    })
+    if (cap.status === "full" && !fallbackFree) {
       out.push({
-        id: `cap_full:${g.id}`, kind: "cap_full", severity: "critical", title: `${g.name}: капа отлита, запасного оффера нет`,
+        id: `cap_full:${g.id}`, kind: "cap_full", severity: "critical",
+        title: `${g.name}: капа отлита, ${g.fallback_offer_ids.length ? "запасные офферы тоже заполнены или выключены" : "запасного оффера нет"}`,
         details: "Трафик продолжает идти на офферы группы, депы сверх капы партнёрка может не оплатить. Добавьте запасной оффер или замените оффер в кампаниях.",
         where: [{ label: g.name, href }, { label: "Замена оффера", href: "#/offers/replace" }],
         buyer_id: null, since: new Date(today.getTime() - 5 * H).toISOString(), status: "open", muted_until: null,
       })
     }
+    // terms are over and nothing follows: no rate and no cap for today's deposits
+    if (cap.status === "no_term") out.push({
+      id: `terms_end:${g.id}`, kind: "terms_end", severity: "critical", title: `${g.name}: условия закончились`,
+      details: "На сегодня у группы нет периода условий: депы идут без ставки и без капы. Добавьте период в группе.",
+      where: [{ label: g.name, href }], buyer_id: null, since: new Date(today.getTime() - 24 * H).toISOString(), status: "open", muted_until: null,
+    })
     const term = cap.term
     if (term) {
       const left = Math.ceil((new Date(`${term.to}T23:59:59`).getTime() - today.getTime()) / (24 * H))
@@ -238,7 +251,7 @@ function accounts(kind: "spend_diff" | "account_error"): Problem[] {
     const diff = a.spend_diff + a.spend_offset
     if (kind === "spend_diff" && diff > a.alert_on_spend_diff) out.push({
       id: `spend_diff:${a.id}`, kind, severity: "warning", title: `Нераспределённый расход ${diff.toFixed(2).replace(".", ",")} $ в кабинете ${a.name}`,
-      details: `Порог кабинета ${a.alert_on_spend_diff} $. Этот расход FB списал, но он не привязался ни к одной кампании трекера: объявления без ссылки трекера или без ID объявления. Найдите объявления или оставьте комментарий в кабинете.`,
+      details: `Порог кабинета ${a.alert_on_spend_diff} $. Этот расход не атрибутирован ни одной кампании трекера${(db.unattributed.get(a.id) ?? []).length ? `: в названии кампаний FB нет ID кампании трекера — ${(db.unattributed.get(a.id) ?? []).map((u) => `«${u.fb_campaign.name}» ${u.spend.toFixed(2).replace(".", ",")} $`).join(", ")}` : ""}. Исправьте нейминг или оставьте комментарий в кабинете.`,
       where, buyer_id: a.buyer_id, since: a.balance_checked_at ?? new Date().toISOString(), status: "open", muted_until: null,
     })
     if (kind === "account_error" && a.last_error) out.push({
@@ -300,6 +313,6 @@ export const fbApi = {
     const set = ad && db.fbAdsets.find((s) => s.id === ad.adset_id)
     const campaign = set && db.fbCampaigns.find((c) => c.id === set.campaign_id)
     const account = campaign && db.fbAccounts.find((a) => a.id === campaign.account_id)
-    return wait(ad ? { ad, adset: set ?? null, campaign: campaign ?? null, account: account ?? null } : null)
+    return wait(ad ? { ad, adset: set ?? null, campaign: campaign ?? null, account: account ? { ...account, api_token: "", proxy: "" } : null } : null)
   },
 }

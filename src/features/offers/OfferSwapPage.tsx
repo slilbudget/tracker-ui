@@ -46,8 +46,8 @@ export default function OfferSwapPage() {
   const fromOffer = offers.data?.find((o) => String(o.id) === from)
   const toOffer = offers.data?.find((o) => String(o.id) === to)
   const req = useMemo(
-    () => (fromOffer && to ? { from_offer_id: fromOffer.id, to_offer_id: to === REMOVE ? null : Number(to), drop_geo_filters: dropFilters } : null),
-    [fromOffer, to, dropFilters],
+    () => (fromOffer && to && to !== from ? { from_offer_id: fromOffer.id, to_offer_id: to === REMOVE ? null : Number(to), drop_geo_filters: dropFilters } : null),
+    [fromOffer, from, to, dropFilters],
   )
   // where the offer stands, shown as soon as it is picked (before the new offer is chosen)
   const usage = useQuery({

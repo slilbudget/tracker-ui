@@ -5,7 +5,7 @@ import type { ColumnDef } from "@tanstack/react-table"
 import { toast } from "sonner"
 import { ArchiveRestoreIcon } from "lucide-react"
 import { api } from "@/api/client"
-import { systemApi, type ArchiveEntity } from "@/api/client-system"
+import { type ArchiveEntity } from "@/api/client-system"
 import { useAccess, useUrlParam } from "@/app/state"
 import { Page, PageHeader, Toolbar } from "@/components/page"
 import { DataTable } from "@/components/data-table"
@@ -53,7 +53,7 @@ export default function ArchivePage() {
     onSuccess: (_, ids) => { refresh(); toast.success(ids.length === 1 ? "Восстановлено" : `Восстановлено: ${ids.length}`) },
   })
   const purge = useMutation({
-    mutationFn: (ids?: number[]) => systemApi.archive.purge(entity.key, ids),
+    mutationFn: (ids?: number[]) => api.system.archive.purge(entity.key, ids),
     onSuccess: () => { refresh(); toast.success("Удалено навсегда") },
   })
 

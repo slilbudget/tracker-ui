@@ -10,12 +10,14 @@ import type {
   Domain,
   FbAd,
   AdAccountAssignment,
+  AdFeePeriod,
   AdProvider,
   FbAdAccount,
   FbAdset,
   FbCampaign,
   FbDayStat,
   Group,
+  ID,
   Integration,
   Landing,
   Offer,
@@ -100,14 +102,14 @@ const NAMES: Record<string, string> = {
 }
 
 export const users: User[] = [
-  { id: 1, login: "admin", name: "Администратор", role_id: 1, team: "—", state: "active", timezone: "Europe/London", language: "ru", group_ids: [], last_login_at: iso(daysAgo(0.1)), created_at: iso(daysAgo(200)), two_factor: true },
-  { id: 2, login: "lead_alpha", name: "Игорь Смирнов", role_id: 2, team: "Alpha", state: "active", timezone: "Europe/London", language: "ru", group_ids: [1, 2, 3, 4], last_login_at: iso(daysAgo(0.3)), created_at: iso(daysAgo(150)), two_factor: true },
-  { id: 3, login: "lead_bravo", name: "Ольга Кузнецова", role_id: 2, team: "Bravo", state: "active", timezone: "Europe/Warsaw", language: "ru", group_ids: [5, 6, 7, 8], last_login_at: iso(daysAgo(1.2)), created_at: iso(daysAgo(140)), two_factor: false },
-  { id: 4, login: "finance", name: "Елена Попова", role_id: 4, team: "—", state: "active", timezone: "Europe/London", language: "ru", group_ids: [], last_login_at: iso(daysAgo(2)), created_at: iso(daysAgo(120)), two_factor: true },
+  { id: 1, login: "admin", name: "Администратор", role_id: 1, team: "—", state: "active", timezone: "Europe/London", language: "ru", group_ids: [], last_login_at: iso(daysAgo(0.1)), created_at: iso(daysAgo(200)), two_factor: true, account_transfer: "all" },
+  { id: 2, login: "lead_alpha", name: "Игорь Смирнов", role_id: 2, team: "Alpha", state: "active", timezone: "Europe/London", language: "ru", group_ids: [1, 2, 3, 4], last_login_at: iso(daysAgo(0.3)), created_at: iso(daysAgo(150)), two_factor: true, account_transfer: "team" },
+  { id: 3, login: "lead_bravo", name: "Ольга Кузнецова", role_id: 2, team: "Bravo", state: "active", timezone: "Europe/Warsaw", language: "ru", group_ids: [5, 6, 7, 8], last_login_at: iso(daysAgo(1.2)), created_at: iso(daysAgo(140)), two_factor: false, account_transfer: "team" },
+  { id: 4, login: "finance", name: "Елена Попова", role_id: 4, team: "—", state: "active", timezone: "Europe/London", language: "ru", group_ids: [], last_login_at: iso(daysAgo(2)), created_at: iso(daysAgo(120)), two_factor: true, account_transfer: "none" },
   ...BUYERS.map((b, i): User => ({
     id: 10 + i, login: b, name: NAMES[b], role_id: i === 7 ? 5 : 3, team: i < 4 ? "Alpha" : "Bravo",
     state: i === 6 ? "disabled" : "active", timezone: "Europe/London", language: "ru", group_ids: [i + 1],
-    last_login_at: i === 6 ? iso(daysAgo(40)) : iso(daysAgo(r() * 3)), created_at: iso(daysAgo(between(20, 180))), two_factor: r() > 0.4,
+    last_login_at: i === 6 ? iso(daysAgo(40)) : iso(daysAgo(r() * 3)), created_at: iso(daysAgo(between(20, 180))), two_factor: r() > 0.4, account_transfer: "none",
   })),
 ]
 
@@ -164,8 +166,8 @@ const monthStart = (shift: number) => new Date(NOW.getFullYear(), NOW.getMonth()
 const monthEnd = (shift: number) => new Date(NOW.getFullYear(), NOW.getMonth() + shift + 1, 0)
 const offerBase = {
   state: "active" as const, offer_type: "external" as const, action_type: "http", payout_type: "CPA" as const, payout_currency: "USD",
-  payout_auto: false, payout_upsell: false, regions: [] as string[], conversion_cap_enabled: false, daily_cap: 0,
-  conversion_timezone: "Europe/London", alternative_offer_id: null, notes: "",
+  payout_auto: false, payout_upsell: false, regions: [] as string[],
+  notes: "",
 }
 
 export const offers: Offer[] = []
@@ -215,7 +217,7 @@ export const offerGroups: OfferGroup[] = []
   }
   offers.push({
     ...offerBase, id: 950, name: "BR | PWA | Arcadia | RoletaSol", group_id: null, affiliate_network_id: 5,
-    url: "https://go.roletasol.example/c/77aa?sub1={subid}", payout_value: 45, country: ["BR"], conversion_timezone: "UTC",
+    url: "https://go.roletasol.example/c/77aa?sub1={subid}", payout_value: 45, country: ["BR"],
     created_at: iso(daysAgo(60)), updated_at: iso(daysAgo(30)),
   })
   group("RoletaSol · Arcadia", 5, "RoletaSol", [950])
@@ -387,21 +389,37 @@ export const adProviders: AdProvider[] = [
 ]
 export const fbAccounts: FbAdAccount[] = []
 export const adAssignments: AdAccountAssignment[] = []
-// current buyer / provider / fee of an account = its open assignment (the API calls this after every change)
-export function syncAccount(a: FbAdAccount) {
-  const cur = adAssignments.find((x) => x.account_id === a.id && x.date_to == null)
-  const p = adProviders.find((x) => x.id === (cur?.provider_id ?? a.provider_id))
-  a.buyer_id = cur?.buyer_id ?? null
-  a.agency = p?.name ?? "—"
-  a.agency_fee = cur?.provider_fee ?? p?.fee ?? 0
+// Fee periods: every provider from the start; Agent Nova raised its fee 10 days ago (older spend keeps 6%);
+// one Nova account has its own terms (added after the accounts are created).
+export const adFees: AdFeePeriod[] = adProviders.map((p) => ({ id: p.id, provider_id: p.id, account_id: null, fee: p.fee, date_from: null, comment: "", created_by: 1 }))
+adFees.push({ id: 7, provider_id: 1, account_id: null, fee: 7, date_from: ymd(daysAgo(10)), comment: "Agent Nova подняла комиссию", created_by: 1 })
+// The fee row of an account on a day: the account's own rows win over the provider's; among them the latest date_from ≤ day.
+export function feeRowOn(accountId: string, providerId: ID | null, day: string) {
+  const fit = adFees.filter((f) => f.provider_id === providerId && (f.date_from == null || f.date_from <= day))
+  const latest = (rows: AdFeePeriod[]) => rows.sort((a, b) => ((a.date_from ?? "") < (b.date_from ?? "") ? 1 : -1))[0] ?? null
+  return latest(fit.filter((f) => f.account_id === accountId)) ?? latest(fit.filter((f) => f.account_id == null))
 }
-// fee and provider on a given day (YYYY-MM-DD): the assignment of that day, else the account default
+export const providerFeeOn = (providerId: ID, day: string) => feeRowOn("", providerId, day)?.fee ?? 0
+const todayYmd = () => new Date().toISOString().slice(0, 10)
+// current buyer (open assignment), provider and today's fee (the API calls this after every change)
+export function syncAccount(a: FbAdAccount) {
+  const day = todayYmd()
+  // by date, not by «open row»: a hand-over from tomorrow does not change today's buyer
+  const cur = adAssignments.find((x) => x.account_id === a.id && x.date_from <= day && (x.date_to == null || day <= x.date_to))
+  a.buyer_id = cur?.buyer_id ?? null
+  a.agency = adProviders.find((x) => x.id === a.provider_id)?.name ?? "—"
+  a.agency_fee = feeRowOn(a.id, a.provider_id, todayYmd())?.fee ?? 0
+}
+// buyer, provider and fee on a given day (YYYY-MM-DD)
 export function accountOnDay(accountId: string, day: string) {
   const a = adAssignments.find((x) => x.account_id === accountId && x.date_from <= day && (x.date_to == null || day <= x.date_to))
   const acc = fbAccounts.find((x) => x.id === accountId)
-  const p = adProviders.find((x) => x.id === (a?.provider_id ?? acc?.provider_id))
-  return { buyer_id: a?.buyer_id ?? null, provider: p?.name ?? "—", fee: a?.provider_fee ?? p?.fee ?? 0 }
+  const p = adProviders.find((x) => x.id === acc?.provider_id)
+  return { buyer_id: a?.buyer_id ?? null, provider: p?.name ?? "—", fee: feeRowOn(accountId, acc?.provider_id ?? null, day)?.fee ?? 0 }
 }
+// FB campaigns whose spend no tracker campaign takes: the name has no id of an existing tracker campaign.
+// Filled after the FB stats are generated; spend_diff of an account = their spend + spend outside any FB campaign we load.
+export const unattributed = new Map<string, { fb_campaign: FbCampaign; spend: number }[]>()
 export const fbCampaigns: FbCampaign[] = []
 export const fbAdsets: FbAdset[] = []
 export const fbAds: FbAd[] = []
@@ -419,7 +437,7 @@ const fbDate = (d: Date) => `${String(d.getDate()).padStart(2, "0")}.${String(d.
       active: true, last_error: "", currency: "USD", timezone: "America/Los_Angeles",
       created_at: iso(daysAgo(30 + (n * 7) % 60)), handed_at: iso(daysAgo(20 + (n * 5) % 40)),
       total_spend: 0, spend_diff: 0, spend_offset: 0, spend_diff_comment: "", alert_on_spend_diff: 50,
-      fb_balance: 0, balance_checked_at: iso(daysAgo(0.02 + (n % 4) * 0.01)), disabled_at: null, watchdog_control: n % 3 === 0, multi_geo: n % 5 === 0,
+      fb_balance: 0, balance_checked_at: iso(daysAgo(0.02 + (n % 4) * 0.01)), disabled_at: null, multi_geo: n % 5 === 0,
       ...extra,
     }
   }
@@ -435,10 +453,10 @@ const fbDate = (d: Date) => `${String(d.getDate()).padStart(2, "0")}.${String(d.
       if (n % 4 === 0) {
         const prev = users.find((x) => (x.role_id === 3 || x.role_id === 5) && x.id !== u.id)!
         const mid = iso(daysAgo(12)).slice(0, 10)
-        adAssignments.push({ id: ++asg, account_id: a.id, buyer_id: prev.id, provider_id: provider, provider_fee: null, date_from: from, date_to: iso(daysAgo(13)).slice(0, 10) })
-        adAssignments.push({ id: ++asg, account_id: a.id, buyer_id: u.id, provider_id: provider, provider_fee: provider === 1 ? 5 : null, date_from: mid, date_to: null })
+        adAssignments.push({ id: ++asg, account_id: a.id, buyer_id: prev.id, date_from: from, date_to: iso(daysAgo(13)).slice(0, 10) })
+        adAssignments.push({ id: ++asg, account_id: a.id, buyer_id: u.id, date_from: mid, date_to: null })
       } else {
-        adAssignments.push({ id: ++asg, account_id: a.id, buyer_id: u.id, provider_id: provider, provider_fee: null, date_from: from, date_to: null })
+        adAssignments.push({ id: ++asg, account_id: a.id, buyer_id: u.id, date_from: from, date_to: null })
       }
     }
   }
@@ -449,6 +467,11 @@ const fbDate = (d: Date) => `${String(d.getDate()).padStart(2, "0")}.${String(d.
     account("act_90020001", "free-farm-01", 4, ++n, { handed_at: iso(daysAgo(1)) }),
     account("act_90030001", "peak-old-01", 3, ++n, { active: false, disabled_at: iso(daysAgo(6)), last_error: "(#200) Ad account has been disabled", handed_at: iso(daysAgo(50)) }),
   )
+  // individual terms: the first Nova account of a_volkov pays 5% (never raised)
+  {
+    const a = fbAccounts.find((x) => x.provider_id === 1 && x.name.startsWith("a_volkov"))
+    if (a) adFees.push({ id: 8, provider_id: 1, account_id: a.id, fee: 5, date_from: null, comment: "Индивидуальные условия", created_by: 1 })
+  }
   for (const a of fbAccounts) syncAccount(a)
   // s_novikov's first account: the token died (FB returns an auth error), balance is stale
   {
@@ -607,21 +630,34 @@ export const conversions: Conversion[] = []
     const [ad_id, day] = key.split("|")
     fbStats.push({ ad_id, day, impressions: Math.round(a.n * (20 + r() * 30)), spend: Math.round(a.spend * 100) / 100 })
   }
-  // account money: spend from FB stats; spend_diff = what FB billed but no tracker campaign took (seeded per account)
+  // account money: spend from FB stats. spend_diff = spend of FB campaigns without a valid tracker id in the name
+  // (+ on one account a creative test launched without the tracker link, which the collector sees only as account spend)
   {
-    const accOfAd = new Map<string, string>()
+    const fcOfAd = new Map<string, FbCampaign>()
     for (const ad of fbAds) {
       const set = fbAdsets.find((x) => x.id === ad.adset_id)!
-      accOfAd.set(ad.id, fbCampaigns.find((x) => x.id === set.campaign_id)!.account_id)
+      fcOfAd.set(ad.id, fbCampaigns.find((x) => x.id === set.campaign_id)!)
     }
+    const ids = new Set(campaigns.map((c) => c.id))
     const spend = new Map<string, number>()
-    for (const st of fbStats) spend.set(accOfAd.get(st.ad_id)!, (spend.get(accOfAd.get(st.ad_id)!) ?? 0) + st.spend)
+    const byFc = new Map<string, number>()
+    for (const st of fbStats) {
+      const fc = fcOfAd.get(st.ad_id)!
+      spend.set(fc.account_id, (spend.get(fc.account_id) ?? 0) + st.spend)
+      byFc.set(fc.id, (byFc.get(fc.id) ?? 0) + st.spend)
+    }
+    for (const fc of fbCampaigns) {
+      if (ids.has(Number(/^(\d+) \|/.exec(fc.name)?.[1] ?? NaN))) continue
+      const list = unattributed.get(fc.account_id) ?? []
+      list.push({ fb_campaign: fc, spend: Math.round((byFc.get(fc.id) ?? 0) * 100) / 100 })
+      unattributed.set(fc.account_id, list)
+    }
     fbAccounts.forEach((a, i) => {
-      a.spend_diff = i === 4 ? 86.4 : i === 9 ? 31.7 : Math.round((i % 6) * 0.37 * 100) / 100
-      a.total_spend = Math.round(((spend.get(a.id) ?? 0) + a.spend_diff) * 100) / 100
+      const outside = i === 9 ? 31.7 : 0
+      a.spend_diff = Math.round(((unattributed.get(a.id) ?? []).reduce((x, u) => x + u.spend, 0) + outside) * 100) / 100
+      a.total_spend = Math.round(((spend.get(a.id) ?? 0) + outside) * 100) / 100
       a.fb_balance = a.active ? Math.round((40 + ((i * 37) % 260)) * 100) / 100 : 0
     })
-    if (fbAccounts[4]) fbAccounts[4].spend_diff_comment = ""
     if (fbAccounts[9]) Object.assign(fbAccounts[9], { spend_diff_comment: "Тест креативов без ссылки трекера, согласовано", alert_on_spend_diff: 100 })
   }
   // a campaign launched today that spends but sends no clicks (wrong link in the ad)
@@ -737,3 +773,17 @@ export const settings: Settings = {
 }
 
 export const CURRENT_USER_ID = 1
+
+// «Пустой трекер» (user menu → «Данные»): the same app over a clean database — only the admin, the roles and the
+// settings, as on a fresh install. The data lives in browser memory: anything created is gone after a reload.
+export const EMPTY_DB = (() => { try { return localStorage.getItem("trk.data") === "empty" } catch { return false } })()
+if (EMPTY_DB) {
+  const all: unknown[][] = [
+    groups, apiKeys, trafficSources, affiliateNetworks, offers, offerGroups, landings, domains, campaigns, streams, approaches,
+    adProviders, fbAccounts, adAssignments, adFees, fbCampaigns, fbAdsets, fbAds, fbStats, clicks, conversions, postbackLog, integrations, audit,
+  ]
+  for (const xs of all) xs.length = 0
+  users.splice(1)
+  unattributed.clear()
+}
+

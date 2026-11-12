@@ -2,8 +2,9 @@
 // Same contract style as client.ts: each function is one backend endpoint.
 import type { Approach, ID } from "./types"
 import * as db from "@/mock/seed"
+import { viewerAccess } from "@/mock/scope"
+import { wait } from "./mock-util"
 
-const wait = <T,>(v: T, ms = 30): Promise<T> => new Promise((res) => setTimeout(() => res(structuredClone(v)), ms))
 
 // Ad naming: tokens in braces, separated by «-». {подход} takes the approach code.
 let adNaming = "{язык}-{команда}-{номер}-{подход}-{штат}-{бренд}-{крео}"
@@ -26,7 +27,9 @@ export const directoryApi = {
       db.approaches.push(a)
       return wait(a)
     },
+    // rename / delete: settings edit access; anyone with campaigns may add (create above)
     update: (id: ID, patch: Partial<Pick<Approach, "name" | "code" | "description">>) => {
+      if (!["full", "own", "groups"].includes(viewerAccess("settings"))) return Promise.reject(new Error("Нет прав менять справочник подходов"))
       const a = db.approaches.find((x) => x.id === id)
       if (!a) return Promise.reject(new Error("Подход не найден"))
       const old = a.name
@@ -36,6 +39,7 @@ export const directoryApi = {
       return wait(a)
     },
     remove: (id: ID) => {
+      if (!["full", "own", "groups"].includes(viewerAccess("settings"))) return Promise.reject(new Error("Нет прав менять справочник подходов"))
       const a = db.approaches.find((x) => x.id === id)
       if (!a) return wait({ ok: true })
       if (db.campaigns.some((c) => c.approach === a.name && c.state !== "deleted")) return Promise.reject(new Error("Подход стоит в кампаниях: сначала смените его там"))

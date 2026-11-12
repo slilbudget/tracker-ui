@@ -70,6 +70,8 @@ export default function OfferGroupsPage() {
     mutationFn: (v: Partial<OfferGroup> & { id?: number }) =>
       v.id ? api.offerGroups.update(v.id, v) : api.offerGroups.create(v as Omit<OfferGroup, "id">),
     onSuccess: (g, v) => {
+      // put the new group into the cached list before opening it, so the sheet never sees «not found»
+      if (!v.id) qc.setQueryData<OfferGroup[]>(["offerGroups"], (xs) => (xs ? [...xs, g] : xs))
       qc.invalidateQueries({ queryKey: ["offerGroups"] })
       qc.invalidateQueries({ queryKey: ["offers"] })
       toast.success(v.id ? "Оффер-группа сохранена" : "Оффер-группа создана: добавьте в неё офферы")
@@ -392,7 +394,11 @@ function OfferGroupSheet({
                           <Input
                             type="number" min={0} inputMode="decimal" className="num w-24 text-right" aria-label={`Ставка: ${o.name}`}
                             value={t.payouts[String(o.id)] ?? ""}
-                            onChange={(e) => setTerm(t.id, { payouts: { ...t.payouts, [String(o.id)]: Number(e.target.value) } })}
+                            onChange={(e) => {
+                              // empty = no rate (not 0 $); a rate is never negative
+                              const { [String(o.id)]: _, ...rest } = t.payouts
+                              setTerm(t.id, { payouts: e.target.value === "" ? rest : { ...rest, [String(o.id)]: Math.max(0, Number(e.target.value)) } })
+                            }}
                           />
                           <span className="text-xs text-muted-foreground">$</span>
                         </div>
@@ -468,7 +474,7 @@ function OfferGroupSheet({
 
         <FormSection title="Заметки">
           <FormRow label="Заметки">
-            <Textarea rows={3} value={form.notes ?? ""} onChange={(e) => set("notes", e.target.value)} placeholder="Контакт рекла, условия выплат, что делать при отливе" />
+            <Textarea rows={3} value={form.notes ?? ""} onChange={(e) => set("notes", e.target.value)} placeholder="Контакт рекламодателя, условия выплат, что делать при отливе" />
           </FormRow>
         </FormSection>
       </fieldset>
