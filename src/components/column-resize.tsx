@@ -114,6 +114,13 @@ export function useColumnWidths(storageKey?: string, flexId?: string) {
       setWidths((p) => (p[id] === w ? p : { ...p, [id]: w }))
     }
     const stop = () => {
+      // the click that follows a real drag must not reach the header (it would sort)
+      if (dragging) {
+        const block = (ev: MouseEvent) => { ev.stopPropagation(); ev.preventDefault() }
+        window.addEventListener("click", block, { capture: true, once: true })
+        setTimeout(() => window.removeEventListener("click", block, { capture: true }), 100)
+      }
+      window.removeEventListener("blur", stop)
       window.removeEventListener("pointermove", move)
       window.removeEventListener("pointerup", stop)
       window.removeEventListener("pointercancel", stop)
@@ -125,6 +132,7 @@ export function useColumnWidths(storageKey?: string, flexId?: string) {
     window.addEventListener("pointermove", move)
     window.addEventListener("pointerup", stop)
     window.addEventListener("pointercancel", stop)
+    window.addEventListener("blur", stop) // alt-tab mid-drag must not leave a stuck drag
     // keep the resize cursor and stop text selection while the pointer is over other cells
     document.documentElement.style.cursor = "col-resize"
     document.body.style.userSelect = "none"
