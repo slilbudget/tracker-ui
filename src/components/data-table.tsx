@@ -183,12 +183,19 @@ export function DataTable<T>({
       ? cn("sticky left-0 z-[2] max-sm:static", part === "head" ? "bg-background" : part === "foot" ? "bg-muted" : "bg-inherit")
       : id === growId ? "max-sm:max-w-[55vw]" : undefined
   // widths the user dragged win over everything else
-  const cw = useColumnWidths(storageKey)
-  // widths fixed by the user: an empty last column takes the free space, so the numbers stay compact
-  const filler = cw.fixed
+  // the main text column stays flexible while the others are resized
+  const cw = useColumnWidths(storageKey, growId)
+  // the main column was sized by hand: an empty last column takes the free space
+  const filler = cw.filler
   const fillerCell = (cls: string) => filler && <td aria-hidden className={cls} />
+  const fallbackOf = (id: string) => {
+    const c = visibleCols.find((x) => x.id === id)
+    const size = c?.columnDef.size
+    return id === "_select" ? 36 : size && size !== 150 ? size : (c?.columnDef.meta?.align ?? "left") === "right" ? 110 : 160
+  }
+  const lastId = visibleCols.at(-1)?.id
   const widthOf = (id: string, size: number | undefined, align: Align) => {
-    if (cw.fixed) return id === "_select" ? { width: 40 } : cw.styleOf(id, size && size !== 150 ? size : align === "right" ? 110 : 160)
+    if (cw.fixed) return cw.styleOf(id, id === "_select" ? 36 : size && size !== 150 ? size : align === "right" ? 110 : 160)
     if (empty0 && frozen[id]) return id === growId ? { width: "100%", minWidth: frozen[id] } : { width: frozen[id], minWidth: frozen[id] }
     return id === growId ? { width: "100%" } : size && size !== 150 ? { width: size } : align === "right" ? { minWidth: "5.5rem" } : undefined
   }
@@ -260,7 +267,10 @@ export function DataTable<T>({
     <div className="flex min-w-0 flex-col gap-2">
       {/* Desktop: the table is its own scroll area (header and totals stay visible). Phones: only sideways, the page scrolls. */}
       <div ref={scrollRef} className="overflow-auto rounded-md border md:max-h-[calc(100svh-14rem)]">
-        <table className={cn("w-full caption-bottom border-separate border-spacing-0 text-sm", cw.fixed && "table-fixed [&_[data-cap]]:max-w-none")}>
+        <table
+          className={cn("w-full caption-bottom border-separate border-spacing-0 text-sm", cw.fixed && "table-fixed [&_[data-cap]]:max-w-none")}
+          style={cw.tableStyle(visibleCols.map((c) => c.id), fallbackOf)}
+        >
           <thead className="sticky top-0 z-[3]">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
@@ -296,7 +306,7 @@ export function DataTable<T>({
                       ) : (
                         flexRender(h.column.columnDef.header, h.getContext())
                       )}
-                      {!h.isPlaceholder && canResize(h.column) && (
+                      {!h.isPlaceholder && canResize(h.column) && h.column.id !== lastId && (
                         <ResizeHandle active={cw.active === h.column.id} onPointerDown={(e) => cw.start(h.column.id, e)} onFit={(el) => cw.fit(h.column.id, el)} />
                       )}
                     </th>

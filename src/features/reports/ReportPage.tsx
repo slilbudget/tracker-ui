@@ -492,10 +492,11 @@ function ReportTable({
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const prevRange = useMemo(() => previousRange(range), [range])
   // widths per grouping: «Кампания» and «День» need different first columns
-  const cw = useColumnWidths(`report.${dims.join(">")}`)
-  const fill = cw.fixed
+  // the grouping column is the flexible one: it takes the free width, the metrics stay compact on the right
+  const cw = useColumnWidths(`report.${dims.join(">")}`, "_dim")
+  const fill = cw.filler
   const ctx: Ctx = {
-    col: (key) => cw.styleOf(key, key === "_dim" ? 220 : 110),
+    col: (key) => (key === "_dim" && !cw.fixed ? { width: "100%" } : cw.styleOf(key, key === "_dim" ? 220 : 110)),
     fill,
     dims, measures, filters, range, prevRange, compare, sort, expanded,
     toggle: (path) => setExpanded((s) => {
@@ -509,6 +510,8 @@ function ReportTable({
   const rows = cur.data?.rows ?? []
   const colSpan = measures.length + 1 + (fill ? 1 : 0)
   const fillCell = (cls: string) => fill && <td aria-hidden className={cls} />
+  // the last column has no divider: nothing to its right to give space to
+  const lastKey = measures.at(-1) ?? "_dim"
 
   const head = (key: string, label: string, right: boolean, title?: string) => (
     <th
@@ -518,7 +521,7 @@ function ReportTable({
       style={ctx.col(key)}
       className={cn("relative h-9 px-2.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground", right ? "text-right" : "sm:sticky sm:left-0 sm:z-10 bg-background text-left")}
     >
-      <ResizeHandle active={cw.active === key} onPointerDown={(e) => cw.start(key, e)} onFit={(el) => cw.fit(key, el)} />
+      {key !== lastKey && <ResizeHandle active={cw.active === key} onPointerDown={(e) => cw.start(key, e)} onFit={(el) => cw.fit(key, el)} />}
       <button
         type="button"
         data-col-label
@@ -534,7 +537,7 @@ function ReportTable({
   return (
     <div className="flex flex-col gap-2">
       <div className="overflow-auto rounded-md border">
-        <table className={cn("w-full text-sm", fill && "table-fixed")}>
+        <table className={cn("w-full text-sm", cw.fixed && "table-fixed")} style={cw.tableStyle(["_dim", ...measures], (k) => (k === "_dim" ? 220 : 110))}>
           <thead className="sticky top-0 z-20 bg-background">
             <tr className="border-b">
               {head("_dim", dims.map((d) => dimensionDef(d)?.name ?? d).join(" › "), false)}

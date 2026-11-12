@@ -1,12 +1,21 @@
-// Column widths set by dragging the divider between header cells (mouse / pen; not on touch screens).
-// The first drag fixes the current width of every column (table-layout: fixed), so only the dragged column changes
-// and it follows the pointer exactly; an empty last column takes the free space. Narrowest = the header label fits,
-// widest = 640px. Double click on a divider = fit to the content. Widths are remembered per table.
+// Column widths set by dragging the divider at the right edge of a header cell (mouse / pen; not on touch screens).
+//
+// How it behaves (owner 12/11: "no jumps, last column has no divider"):
+// - Untouched table: automatic layout; the main text column (`flexId`) takes the free width.
+// - A plain click on a divider changes nothing. The first real move (≥ 3px) freezes every column at the width it has
+//   on screen right now, so nothing jumps, and from then on only the dragged column follows the pointer.
+//   The main column stays flexible and gives / takes the space; when it is at its minimum the table grows and scrolls.
+// - If the main column itself is dragged, an empty last column takes the free space instead.
+// - Narrowest = the header label fits (numeric columns: also their widest value), widest = 640px.
+// - Double click on a divider = as wide as the content. «Сбросить ширину колонок» = back to automatic.
+// - Widths are remembered per table (localStorage `trk.colw3.<key>`).
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react"
 import { cn } from "@/lib/utils"
 
 const MAX_W = 640
-const key = (k: string) => `trk.colw2.${k}`
+const FLEX_MIN = 160 // the main column never gets narrower than this while other columns grow
+const DRAG_START = 3 // px of movement before a press becomes a drag
+const key = (k: string) => `trk.colw3.${k}`
 const load = (k?: string): Record<string, number> => {
   if (!k) return {}
   try { return JSON.parse(localStorage.getItem(key(k)) ?? "{}") } catch { return {} }
@@ -18,8 +27,7 @@ function minWidth(th: HTMLTableCellElement) {
   const cs = getComputedStyle(th)
   return Math.ceil((label?.scrollWidth ?? 24) + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + 4)
 }
-// width of the widest body / totals value of the header cell's column, measured on the text itself
-// (not on the cell, which is never narrower than its fixed width) + the cell's side paddings
+// width of the widest body / totals value of the column, measured on its text + the cell's side paddings
 function contentWidth(th: HTMLTableCellElement) {
   const table = th.closest("table")
   if (!table) return 0
@@ -29,24 +37,34 @@ function contentWidth(th: HTMLTableCellElement) {
   for (const r of Array.from(table.querySelectorAll<HTMLTableRowElement>("tbody tr, tfoot tr"))) {
     const cell = r.cells[idx]
     if (!cell || cell.colSpan > 1 || r.cells.length < idx + 1) continue
-    range.selectNodeContents(cell)
+    // span of the text nodes only: block or full-width wrappers inside the cell would report the cell's own width
+    let left = Infinity, right = -Infinity
+    const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT)
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      if (!n.textContent?.trim()) continue
+      range.selectNodeContents(n)
+      const b = range.getBoundingClientRect()
+      left = Math.min(left, b.left)
+      right = Math.max(right, b.right)
+    }
+    if (right < left) continue
     const cs = getComputedStyle(cell)
-    w = Math.max(w, range.getBoundingClientRect().width + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight))
+    w = Math.max(w, right - left + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight))
   }
   return Math.ceil(w) + 2
 }
 
-// widths of all header cells of the row, as they are on screen now
-function snapshot(row: HTMLTableRowElement) {
+// widths of the header cells as they are on screen now (the flexible column is left out unless asked)
+function snapshot(row: HTMLTableRowElement, flexId: string | undefined, keepFlex: boolean) {
   const out: Record<string, number> = {}
   for (const th of Array.from(row.cells)) {
     const id = th.dataset.colId
-    if (id) out[id] = Math.ceil(th.getBoundingClientRect().width)
+    if (id && (keepFlex || id !== flexId)) out[id] = Math.round(th.getBoundingClientRect().width)
   }
   return out
 }
 
-export function useColumnWidths(storageKey?: string) {
+export function useColumnWidths(storageKey?: string, flexId?: string) {
   const [widths, setWidths] = useState<Record<string, number>>(() => load(storageKey))
   // another table under the same component (report grouping changed): take its own saved widths
   const [loadedKey, setLoadedKey] = useState(storageKey)
@@ -58,10 +76,17 @@ export function useColumnWidths(storageKey?: string) {
   const cleanup = useRef<(() => void) | null>(null)
   useEffect(() => {
     if (!storageKey) return
-    try { localStorage.setItem(key(storageKey), JSON.stringify(widths)) } catch { /* private mode */ }
+    try {
+      if (Object.keys(widths).length) localStorage.setItem(key(storageKey), JSON.stringify(widths))
+      else localStorage.removeItem(key(storageKey))
+    } catch { /* private mode */ }
   }, [widths, storageKey])
   useEffect(() => () => cleanup.current?.(), [])
+
   const fixed = Object.keys(widths).length > 0
+  // the main column was sized by hand: an empty last column takes the free space
+  const filler = fixed && (!flexId || widths[flexId] != null)
+  const flexible = (id: string) => id === flexId && widths[id] == null
 
   const start = (id: string, e: ReactPointerEvent<HTMLElement>) => {
     if (e.button !== 0) return
@@ -72,12 +97,20 @@ export function useColumnWidths(storageKey?: string) {
     if (!th || !row) return
     // numbers are never cut: a right-aligned (numeric) column is at least as wide as its widest value
     const min = Math.max(minWidth(th), getComputedStyle(th).textAlign === "right" ? contentWidth(th) : 0)
-    const base = { ...snapshot(row), ...widths }
     const startX = e.clientX
     const startW = Math.round(th.getBoundingClientRect().width)
-    setWidths(base)
+    let dragging = false
     const move = (ev: PointerEvent) => {
-      const w = Math.round(Math.min(MAX_W, Math.max(min, startW + ev.clientX - startX)))
+      const dx = ev.clientX - startX
+      if (!dragging) {
+        if (Math.abs(dx) < DRAG_START) return
+        dragging = true
+        setActive(id)
+        // freeze what is on screen, so the first frame of the drag looks exactly like the last frame before it
+        const base = snapshot(row, flexId, id === flexId)
+        setWidths((p) => ({ ...base, ...p }))
+      }
+      const w = Math.round(Math.min(MAX_W, Math.max(min, startW + dx)))
       setWidths((p) => (p[id] === w ? p : { ...p, [id]: w }))
     }
     const stop = () => {
@@ -96,7 +129,6 @@ export function useColumnWidths(storageKey?: string) {
     document.documentElement.style.cursor = "col-resize"
     document.body.style.userSelect = "none"
     cleanup.current = stop
-    setActive(id)
   }
 
   // double click: as wide as the widest value in the column (like Excel)
@@ -104,21 +136,29 @@ export function useColumnWidths(storageKey?: string) {
     const th = el.closest("th")
     const row = th?.parentElement as HTMLTableRowElement | null
     if (!th || !row) return
-    const w = Math.max(minWidth(th), contentWidth(th))
-    setWidths((p) => ({ ...(Object.keys(p).length ? p : snapshot(row)), [id]: Math.min(MAX_W, w) }))
+    const w = Math.min(MAX_W, Math.max(minWidth(th), contentWidth(th)))
+    const base = snapshot(row, flexId, id === flexId)
+    setWidths((p) => ({ ...base, ...p, [id]: w }))
   }
 
   const reset = () => setWidths({})
 
-  // header cell style; `fallback` = width of a column shown later (not in the saved set) while widths are fixed
+  // header cell style. `fallback` = width of a column shown later (not in the saved set) while widths are fixed.
   const styleOf = (id: string, fallback = 120): CSSProperties | undefined =>
-    fixed ? { width: widths[id] ?? fallback } : undefined
+    !fixed || flexible(id) ? undefined : { width: widths[id] ?? fallback }
 
-  return { widths, fixed, active, start, fit, reset, styleOf }
+  // with fixed widths the table is never narrower than its columns (+ room for the flexible one): it scrolls instead
+  const tableStyle = (ids: string[], fallback: (id: string) => number = () => 120): CSSProperties | undefined => {
+    if (!fixed) return undefined
+    const sum = ids.reduce((s, id) => s + (flexible(id) ? FLEX_MIN : widths[id] ?? fallback(id)), 0)
+    return { minWidth: sum }
+  }
+
+  return { widths, fixed, filler, active, start, fit, reset, styleOf, tableStyle }
 }
 
 // Divider on the right edge of a header cell: a short thin line (the place to grab) and an 8px wide grab zone.
-// While dragging the line is full height and blue. Hidden on touch screens.
+// While dragging the line is full height. Not rendered for the last column. Hidden on touch screens.
 export function ResizeHandle({ active, onPointerDown, onFit }: { active: boolean; onPointerDown: (e: ReactPointerEvent<HTMLElement>) => void; onFit: (el: HTMLElement) => void }) {
   return (
     <span
