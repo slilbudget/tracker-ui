@@ -25,7 +25,7 @@ const load = (k?: string): Record<string, number> => {
 function minWidth(th: HTMLTableCellElement) {
   const label = th.querySelector<HTMLElement>("[data-col-label]")
   const cs = getComputedStyle(th)
-  return Math.ceil((label?.scrollWidth ?? 24) + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + 4)
+  return Math.ceil((label?.getBoundingClientRect().width ?? 24) + parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) + 4)
 }
 // width of the widest body / totals value of the column, measured on its text + the cell's side paddings
 function contentWidth(th: HTMLTableCellElement) {
@@ -96,21 +96,28 @@ export function useColumnWidths(storageKey?: string, flexId?: string) {
     const row = th?.parentElement as HTMLTableRowElement | null
     if (!th || !row) return
     // numbers are never cut: a right-aligned (numeric) column is at least as wide as its widest value
-    const min = Math.max(minWidth(th), getComputedStyle(th).textAlign === "right" ? contentWidth(th) : 0)
+    const min = Math.max(minWidth(th), ["right", "end"].includes(getComputedStyle(th).textAlign) ? contentWidth(th) : 0)
+    // the divider must stay under the pointer: a flexible column to the LEFT would absorb the change and the divider
+    // would stand still, so it is frozen for this drag too (an empty last column then takes the slack).
+    // A flexible column to the right may keep absorbing: the divider still follows the pointer.
+    const flexTh = flexId ? Array.from(row.cells).find((c) => c.dataset.colId === flexId) : undefined
+    const keepFlex = id === flexId || (!!flexTh && flexTh.cellIndex < th.cellIndex)
     const startX = e.clientX
     const startW = Math.round(th.getBoundingClientRect().width)
     let dragging = false
     const move = (ev: PointerEvent) => {
+      if (ev.buttons === 0) return stop() // the release was swallowed (context menu, ctrl+click on macOS)
       const dx = ev.clientX - startX
       if (!dragging) {
         if (Math.abs(dx) < DRAG_START) return
         dragging = true
         setActive(id)
         // freeze what is on screen, so the first frame of the drag looks exactly like the last frame before it
-        const base = snapshot(row, flexId, id === flexId)
+        const base = snapshot(row, flexId, keepFlex)
         setWidths((p) => ({ ...base, ...p }))
       }
-      const w = Math.round(Math.min(MAX_W, Math.max(min, startW + dx)))
+      // a column already wider than the cap (the flexible one on a wide screen) may not jump down to it
+      const w = Math.round(Math.min(Math.max(MAX_W, startW), Math.max(min, startW + dx)))
       setWidths((p) => (p[id] === w ? p : { ...p, [id]: w }))
     }
     const stop = () => {
