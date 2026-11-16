@@ -23,10 +23,26 @@ export function setViewerRole(role: Role) {
 export const viewerGroupIds = () => groupIds
 // Checked live (not a snapshot), so campaigns created or moved after the role switch count too.
 let index: { n: number; byId: Map<number, Campaign> } = { n: -1, byId: new Map() }
+const campaignById = (id: number) => {
+  if (index.n !== campaigns.length) index = { n: campaigns.length, byId: new Map(campaigns.map((c) => [c.id, c])) }
+  return index.byId.get(id) ?? campaigns.find((x) => x.id === id)
+}
+// a single-object grant of the viewer on this campaign or its group (null = none)
+function grantOn(c: Campaign): "read" | "edit" | null {
+  const g = viewerUser().grants.filter((x) => (x.kind === "campaign" && x.id === c.id) || (x.kind === "campaign_group" && x.id === c.group_id))
+  return g.some((x) => x.level === "edit") ? "edit" : g.length ? "read" : null
+}
 export const canSeeCampaign = (id: number | null | undefined) => {
   if (groupIds === null) return true
   if (id == null) return false
-  if (index.n !== campaigns.length) index = { n: campaigns.length, byId: new Map(campaigns.map((c) => [c.id, c])) }
-  const c = index.byId.get(id) ?? campaigns.find((x) => x.id === id)
-  return !!c && (c.owner_id === viewerId || (c.group_id != null && groupIds.includes(c.group_id)))
+  const c = campaignById(id)
+  return !!c && (c.owner_id === viewerId || (c.group_id != null && groupIds.includes(c.group_id)) || grantOn(c) != null)
+}
+// edit = the role lets the viewer change this campaign, or a grant gives «edit» on it or its group
+export function campaignAccess(id: number): "edit" | "read" | "none" {
+  const c = campaignById(id)
+  if (!c || !canSeeCampaign(id)) return "none"
+  const level = viewerAccess("campaigns")
+  const byRole = level === "full" || ((level === "own" || level === "groups") && (c.owner_id === viewerId || (c.group_id != null && (groupIds ?? []).includes(c.group_id))))
+  return byRole || grantOn(c) === "edit" ? "edit" : "read"
 }

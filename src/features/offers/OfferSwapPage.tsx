@@ -12,6 +12,8 @@ import { FormRow } from "@/components/common"
 import { Icon } from "@/components/icon"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
+import { Slicer } from "@/components/slicer"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { capClass, capText, geoText, isRestricted } from "./caps"
@@ -42,6 +44,13 @@ export default function OfferSwapPage() {
   const groups = useQuery({ queryKey: ["offerGroups", "caps"], queryFn: api.offerGroups.caps })
   const history = useQuery({ queryKey: ["offerSwap", "history"], queryFn: api.offerSwap.history })
   const users = useQuery({ queryKey: ["users"], queryFn: api.users.list })
+  const campGroups = useQuery({ queryKey: ["groups", "campaigns"], queryFn: () => api.groups.list("campaigns") })
+  // which campaigns the replacement touches: name, approach, buyer, group, geo (owner 15/11)
+  const [q, setQ] = useState("")
+  const [fApproach, setFApproach] = useState<string[]>([])
+  const [fBuyer, setFBuyer] = useState<string[]>([])
+  const [fGroup, setFGroup] = useState<string[]>([])
+  const [fGeo, setFGeo] = useState<string[]>([])
 
   const fromOffer = offers.data?.find((o) => String(o.id) === from)
   const toOffer = offers.data?.find((o) => String(o.id) === to)
@@ -56,7 +65,27 @@ export default function OfferSwapPage() {
     enabled: !!fromOffer,
   })
   const preview = useQuery({ queryKey: ["offerSwap", "preview", req], queryFn: () => api.offerSwap.preview(req!), enabled: !!req })
-  const rows = preview.data ?? []
+  const allRows = preview.data ?? []
+  const campOf = (id: number) => campaigns.data?.find((c) => c.id === id)
+  const rows = allRows.filter((r) => {
+    const c = campOf(r.campaign_id)
+    return (!q.trim() || (c?.name ?? "").toLowerCase().includes(q.trim().toLowerCase()) || r.stream_name.toLowerCase().includes(q.trim().toLowerCase()))
+      && (!fApproach.length || fApproach.includes(c?.approach || "—"))
+      && (!fBuyer.length || fBuyer.includes(String(c?.owner_id)))
+      && (!fGroup.length || fGroup.includes(String(c?.group_id ?? "none")))
+      && (!fGeo.length || r.geo.some((g) => fGeo.includes(g)))
+  })
+  const filtered = rows.length !== allRows.length
+  const anyFilter = !!q.trim() || fApproach.length + fBuyer.length + fGroup.length + fGeo.length > 0
+  const uniq = (xs: string[]) => [...new Set(xs)].sort((a, b) => a.localeCompare(b, "ru"))
+  const opts = {
+    approach: uniq(allRows.map((r) => campOf(r.campaign_id)?.approach || "—")).map((v) => ({ value: v, label: v === "—" ? "Без подхода" : v })),
+    buyer: uniq(allRows.map((r) => String(campOf(r.campaign_id)?.owner_id ?? ""))).filter(Boolean)
+      .map((v) => ({ value: v, label: users.data?.find((u) => String(u.id) === v)?.login ?? `#${v}` })),
+    group: uniq(allRows.map((r) => String(campOf(r.campaign_id)?.group_id ?? "none")))
+      .map((v) => ({ value: v, label: v === "none" ? "Без группы" : campGroups.data?.find((g) => String(g.id) === v)?.name ?? `#${v}` })),
+    geo: uniq(allRows.flatMap((r) => r.geo)).map((v) => ({ value: v, label: v })),
+  }
   const chosen = rows.filter((r) => !excluded.has(r.stream_id))
   const chosenCampaigns = new Set(chosen.map((r) => r.campaign_id)).size
 
@@ -147,11 +176,22 @@ export default function OfferSwapPage() {
 
       {req && (
         <Section
-          title={<>Что изменится <span className="text-sm font-normal text-muted-foreground">· потоков {chosen.length} из {rows.length}, кампаний {chosenCampaigns}{geoFilterRows > 0 && `, фильтр по штатам уберётся в ${geoFilterRows}`}</span></>}
-          actions={canEdit && rows.length > 0 && <Button disabled={!chosen.length || apply.isPending} onClick={() => apply.mutate()}>Заменить в {chosen.length} {plural(chosen.length)}</Button>}
+          title={<>Что изменится <span className="text-sm font-normal text-muted-foreground">· потоков {chosen.length} из {allRows.length}, кампаний {chosenCampaigns}{geoFilterRows > 0 && `, фильтр по штатам уберётся в ${geoFilterRows}`}</span></>}
+          actions={canEdit && allRows.length > 0 && <Button disabled={!chosen.length || apply.isPending} onClick={() => apply.mutate()}>Заменить в {chosen.length} {plural(chosen.length)}</Button>}
         >
+          {allRows.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 px-3 pb-2">
+              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Кампания или поток" aria-label="Поиск кампании" className="w-full sm:w-56" />
+              <Slicer label="Подход" options={opts.approach} value={fApproach} onChange={setFApproach} />
+              <Slicer label="Байер" options={opts.buyer} value={fBuyer} onChange={setFBuyer} />
+              <Slicer label="Группа" options={opts.group} value={fGroup} onChange={setFGroup} />
+              <Slicer label="Гео" options={opts.geo} value={fGeo} onChange={setFGeo} />
+              {anyFilter && <Button variant="ghost" onClick={() => { setQ(""); setFApproach([]); setFBuyer([]); setFGroup([]); setFGeo([]) }}>Сбросить</Button>}
+              {filtered && <span className="text-sm text-muted-foreground">Замена коснётся только показанных потоков</span>}
+            </div>
+          )}
           {rows.length === 0 ? (
-            <p className="px-3 pb-3 text-sm text-muted-foreground">{preview.isLoading ? "Считаю…" : "Оффер не стоит ни в одном потоке ваших кампаний"}</p>
+            <p className="px-3 pb-3 text-sm text-muted-foreground">{preview.isLoading ? "Считаю…" : allRows.length ? "Под фильтры не попал ни один поток" : "Оффер не стоит ни в одном потоке ваших кампаний"}</p>
           ) : (
             <div className="overflow-x-auto border-t">
               <table className="w-full text-sm">
@@ -160,12 +200,13 @@ export default function OfferSwapPage() {
                     <th className="w-10 px-3 py-2">
                       <Checkbox
                         aria-label="Все потоки"
-                        checked={excluded.size === 0 ? true : excluded.size === rows.length ? false : "indeterminate"}
-                        onCheckedChange={(v) => setExcluded(v ? new Set() : new Set(rows.map((r) => r.stream_id)))}
+                        checked={chosen.length === rows.length ? true : chosen.length === 0 ? false : "indeterminate"}
+                        onCheckedChange={(v) => setExcluded((s) => { const n = new Set(s); for (const r of rows) { if (v) n.delete(r.stream_id); else n.add(r.stream_id) } return n })}
                       />
                     </th>
                     <th className="px-3 py-2 font-medium">Кампания</th>
                     <th className="px-3 py-2 font-medium">Поток</th>
+                    <th className="px-3 py-2 font-medium">Гео</th>
                     <th className="px-3 py-2 font-medium">Было</th>
                     <th className="px-3 py-2 font-medium">Станет</th>
                   </tr>
@@ -182,6 +223,7 @@ export default function OfferSwapPage() {
                       </td>
                       <td className="px-3 py-2"><a href={`#/campaigns/${r.campaign_id}`} className="text-link">{campaignName(r.campaign_id)}</a></td>
                       <td className="px-3 py-2">{r.stream_name}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{r.geo.join(", ") || "—"}</td>
                       <td className="px-3 py-2"><OfferList items={r.before} name={offerName} mark={fromOffer?.id} filters={regionFilter(r, "before")} /></td>
                       <td className="px-3 py-2"><OfferList items={r.after} name={offerName} mark={toOffer?.id} filters={regionFilter(r, "after")} empty="Офферов не останется: поток перестанет отправлять на оффер" /></td>
                     </tr>

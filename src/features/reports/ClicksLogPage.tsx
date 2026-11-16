@@ -1,4 +1,4 @@
-// Clicks log: server-like pagination (api.clicks.log limit/offset), filters, search, columns menu, CSV export, row → side sheet.
+// Clicks log: server-like pagination (api.clicks.log limit/offset), filters, search, column settings (all fields, order), CSV export, row → side sheet.
 import { useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
@@ -14,17 +14,14 @@ import { PeriodSelect } from "@/components/period-select"
 import { SearchInput, downloadCsv } from "@/components/common"
 import { Icon } from "@/components/icon"
 import { Button } from "@/components/ui/button"
+import { ColumnsButton, useColumnChoice, type ColumnChoice } from "@/components/columns-dialog"
 import { formatDateTime } from "@/lib/dates"
 import { fmtMoney } from "@/lib/format"
 import { ClickSheet, DEVICE, FIELD_LABELS, fieldText } from "./ClickSheet"
 import { FilterBuilder, RELAX_HINT, hasExactFilter } from "./FilterBuilder"
-import { CampaignSelect, Clip, EntityName, decodeFilters, encodeFilters, reportLink, useColumnPrefixes, usePage, useNames } from "./shared"
+import { CampaignSelect, Clip, EntityName, decodeFilters, encodeFilters, reportLink, SUBS, SUB_ALIASES, useColumnPrefixes, usePage, useNames } from "./shared"
 
-// sub_id_1..6 aliases (Facebook campaign parameters)
-const SUB_ALIASES: Record<string, string> = {
-  sub_id_1: "Кабинет", sub_id_2: "Плейсмент", sub_id_3: "ID группы", sub_id_4: "Группа", sub_id_5: "Пиксель", sub_id_6: "ID объявления",
-}
-const SUBS = ["sub_id_1", "sub_id_2", "sub_id_3", "sub_id_4", "sub_id_5", "sub_id_6"] as const
+const DEFAULT_COLS = ["campaign", "stream", "landing", "offer", "country", "is_bot", "is_unique", "cost"]
 
 export default function ClicksLogPage() {
   const { timezone } = useApp()
@@ -57,45 +54,56 @@ export default function ClicksLogPage() {
   // one update for all keys (several useUrlParam setters in a row overwrite each other)
   const resetFilters = () => setParams((p) => { const n = new URLSearchParams(p); ["c", "q", "f"].forEach((k) => n.delete(k)); return n }, { replace: true })
 
-  const columns = useMemo<ColumnDef<Click, unknown>[]>(() => {
+  // every field of the log (Keitaro-like column settings); time and subid are always shown
+  const catalog = useMemo(() => {
     const nm = names.data
-    const col = (id: string, header: string, accessorFn: (c: Click) => string | number | null | undefined, extra: Partial<ColumnDef<Click, unknown>> = {}) =>
-      ({ id, header, accessorFn, enableSorting: false, ...extra }) as ColumnDef<Click, unknown>
-    return [
-      col("datetime", "Время клика", (c) => formatDateTime(c.datetime, timezone), { enableHiding: false }),
-      col("sub_id", "Subid", (c) => c.sub_id, { enableHiding: false, cell: ({ row }) => <span className="font-mono">{row.original.sub_id}</span> }),
-      col("campaign", "Кампания", (c) => nm?.campaigns[c.campaign_id] ?? c.campaign_id, {
-        meta: { grow: true },
-        cell: ({ row }) => <Clip><EntityName id={row.original.campaign_id} name={nm?.campaigns[row.original.campaign_id]} prefix={pre.campaign} /></Clip>,
-      }),
-      col("buyer", "Байер", (c) => nm?.buyers[c.buyer_id] ?? "—"),
-      col("stream", "Поток", (c) => nm?.streams[c.stream_id] ?? c.stream_id, {
-        cell: ({ row }) => <Clip><EntityName id={row.original.stream_id} name={nm?.streams[row.original.stream_id]} prefix={pre.stream} /></Clip>,
-      }),
-      col("landing", "Лендинг", (c) => (c.landing_id ? nm?.landings[c.landing_id] ?? c.landing_id : "—"), {
-        cell: ({ row }) => <Clip><EntityName id={row.original.landing_id} name={row.original.landing_id ? nm?.landings[row.original.landing_id] : undefined} prefix={pre.landing} /></Clip>,
-      }),
-      col("offer", "Оффер", (c) => (c.offer_id ? nm?.offers[c.offer_id] ?? c.offer_id : "—"), {
-        cell: ({ row }) => <Clip><EntityName id={row.original.offer_id} name={row.original.offer_id ? nm?.offers[row.original.offer_id] : undefined} prefix={pre.offer} /></Clip>,
-      }),
-      col("country", "Страна", (c) => c.country),
-      col("region", "Регион", (c) => c.region),
-      col("city", "Город", (c) => c.city),
-      col("os", "ОС", (c) => c.os),
-      col("browser", "Браузер", (c) => c.browser),
-      col("device", "Устройство", (c) => DEVICE[c.device_type] ?? c.device_type),
-      col("ip", "IP", (c) => c.ip, { cell: ({ row }) => <span className="font-mono">{row.original.ip}</span> }),
-      col("is_bot", "Бот", (c) => (c.is_bot ? "Да" : "—"), {
-        cell: ({ row }) => (row.original.is_bot ? "Да" : <span className="text-muted-foreground">—</span>),
-      }),
-      col("is_unique", "Уник.", (c) => (c.is_unique_campaign ? "Да" : "—"), {
-        cell: ({ row }) => (row.original.is_unique_campaign ? "Да" : <span className="text-muted-foreground">—</span>),
-      }),
-      ...(showCost ? [col("cost", "Расход", (c) => c.cost, { meta: { align: "right" }, cell: ({ row }) => fmtMoney(row.original.cost) })] : []),
-      ...SUBS.map((k) => col(k, SUB_ALIASES[k], (c) => c[k], { meta: { label: `${k} · ${SUB_ALIASES[k]}` } })),
-      col("external_id", "External ID", (c) => c.external_id, { cell: ({ row }) => <span className="font-mono">{row.original.external_id}</span> }),
-    ]
+    const yes = (v: boolean) => (v ? "Да" : <span className="text-muted-foreground">—</span>)
+    const defs: (ColumnChoice & { col: ColumnDef<Click, unknown> })[] = []
+    const add = (group: string, id: string, label: string, accessorFn: (c: Click) => string | number | null | undefined, extra: Partial<ColumnDef<Click, unknown>> = {}, header = label) =>
+      defs.push({ id, label, group, col: { id, header, accessorFn, enableSorting: false, enableHiding: false, ...extra } as ColumnDef<Click, unknown> })
+    const entity = (id: number | null, name: string | undefined, prefix: string) => <Clip><EntityName id={id} name={name} prefix={prefix} /></Clip>
+    add("Основные", "datetime", "Время клика", (c) => formatDateTime(c.datetime, timezone))
+    add("Основные", "sub_id", "Subid", (c) => c.sub_id, { cell: ({ row }) => <span className="font-mono">{row.original.sub_id}</span> })
+    add("Основные", "campaign", "Кампания", (c) => nm?.campaigns[c.campaign_id] ?? c.campaign_id, {
+      meta: { grow: true }, cell: ({ row }) => entity(row.original.campaign_id, nm?.campaigns[row.original.campaign_id], pre.campaign),
+    })
+    add("Основные", "buyer", "Байер", (c) => nm?.buyers[c.buyer_id] ?? "—")
+    add("Основные", "stream", "Поток", (c) => nm?.streams[c.stream_id] ?? c.stream_id, { cell: ({ row }) => entity(row.original.stream_id, nm?.streams[row.original.stream_id], pre.stream) })
+    add("Основные", "landing", "Лендинг", (c) => (c.landing_id ? nm?.landings[c.landing_id] ?? c.landing_id : "—"), {
+      cell: ({ row }) => entity(row.original.landing_id, row.original.landing_id ? nm?.landings[row.original.landing_id] : undefined, pre.landing),
+    })
+    add("Основные", "offer", "Оффер", (c) => (c.offer_id ? nm?.offers[c.offer_id] ?? c.offer_id : "—"), {
+      cell: ({ row }) => entity(row.original.offer_id, row.original.offer_id ? nm?.offers[row.original.offer_id] : undefined, pre.offer),
+    })
+    add("Основные", "network", "Партнёрка", (c) => { const n = c.offer_id ? nm?.offerNetwork[c.offer_id] : undefined; return n ? nm?.networks[n] ?? n : "—" })
+    add("Основные", "ts", "Источник", (c) => (c.ts_id ? nm?.sources[c.ts_id] ?? c.ts_id : "—"))
+    add("ID", "campaign_id", "ID кампании", (c) => c.campaign_id, { meta: { align: "right" } })
+    add("ID", "stream_id", "ID потока", (c) => c.stream_id, { meta: { align: "right" } })
+    add("ID", "landing_id", "ID лендинга", (c) => c.landing_id ?? "—", { meta: { align: "right" } })
+    add("ID", "offer_id", "ID оффера", (c) => c.offer_id ?? "—", { meta: { align: "right" } })
+    add("ID", "external_id", "External ID", (c) => c.external_id, { cell: ({ row }) => <span className="font-mono">{row.original.external_id}</span> })
+    for (const k of SUBS) add("Параметры", k, `${k} · ${SUB_ALIASES[k]}`, (c) => c[k], {}, SUB_ALIASES[k])
+    add("Гео", "country", "Страна", (c) => c.country)
+    add("Гео", "region", "Регион", (c) => c.region)
+    add("Гео", "city", "Город", (c) => c.city)
+    add("Устройство", "device", "Устройство", (c) => DEVICE[c.device_type] ?? c.device_type)
+    add("Устройство", "device_model", "Модель устройства", (c) => c.device_model)
+    add("Устройство", "os", "ОС", (c) => c.os)
+    add("Устройство", "browser", "Браузер", (c) => c.browser)
+    add("Соединение", "ip", "IP", (c) => c.ip, { cell: ({ row }) => <span className="font-mono">{row.original.ip}</span> })
+    add("Соединение", "connection_type", "Подключение", (c) => c.connection_type || "—")
+    add("Признаки", "is_bot", "Бот", (c) => (c.is_bot ? "Да" : "—"), { cell: ({ row }) => yes(row.original.is_bot) })
+    add("Признаки", "is_unique", "Уникальный (кампания)", (c) => (c.is_unique_campaign ? "Да" : "—"), { cell: ({ row }) => yes(row.original.is_unique_campaign) }, "Уник.")
+    add("Признаки", "is_unique_stream", "Уникальный (поток)", (c) => (c.is_unique_stream ? "Да" : "—"), { cell: ({ row }) => yes(row.original.is_unique_stream) }, "Уник. поток")
+    add("Признаки", "lp_clicked", "Клик по лендингу", (c) => (c.lp_clicked ? "Да" : "—"), { cell: ({ row }) => yes(row.original.lp_clicked) }, "Клик LP")
+    if (showCost) add("Деньги", "cost", "Расход", (c) => c.cost, { meta: { align: "right" }, cell: ({ row }) => fmtMoney(row.original.cost) })
+    return defs
   }, [names.data, timezone, showCost, pre])
+  const choice = useColumnChoice("clicks", catalog, DEFAULT_COLS)
+  const columns = useMemo(
+    () => ["datetime", "sub_id", ...choice.visible].map((id) => catalog.find((d) => d.id === id)?.col).filter((c): c is ColumnDef<Click, unknown> => !!c),
+    [catalog, choice.visible],
+  )
 
   const exportCsv = async () => {
     setExporting(true)
@@ -134,7 +142,12 @@ export default function ClicksLogPage() {
             <FilterBuilder value={userFilters} onChange={(f) => setFRaw(encodeFilters(f))} />
           </>
         }
-        right={<PeriodSelect value={range} onChange={setRange} />}
+        right={
+          <>
+            <ColumnsButton all={catalog} value={choice.visible} defaults={DEFAULT_COLS} fixed={["datetime", "sub_id"]} onChange={choice.setVisible} />
+            <PeriodSelect value={range} onChange={setRange} />
+          </>
+        }
       />
       <DataTable
         data={log.data?.rows}
@@ -142,8 +155,7 @@ export default function ClicksLogPage() {
         columns={columns}
         getRowId={(c) => c.sub_id}
         onRowClick={(c) => setOpen(c.sub_id)}
-        storageKey="clicks-log.v2"
-        initialHidden={["buyer", "region", "city", "os", "browser", "device", "ip", "sub_id_1", "sub_id_2", "sub_id_3", "sub_id_4", "sub_id_5", "sub_id_6", "external_id"]}
+        storageKey="clicks-log.v3"
         serverPaging={{ total: log.data?.total ?? 0, pageIndex: pg.page, pageSize: pg.size, onPageChange: pg.setPage, onPageSizeChange: pg.setSize }}
         empty="Кликов нет за выбранный период"
         onResetFilters={filtered ? resetFilters : undefined}

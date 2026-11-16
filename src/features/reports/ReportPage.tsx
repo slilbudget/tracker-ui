@@ -1,41 +1,36 @@
-// Report builder: grouping (up to 10 levels, as deep as the PBI matrices) → drill-down tree table, filters, metrics, period comparison,
+// Report builder: grouping (up to 10 levels, as deep as the PBI matrices) → drill-down tree table on AG Grid (ReportGrid.tsx), filters, metrics, period comparison,
 // saved presets. The whole state lives in the URL (g, m, f, cmp, period) so a link reproduces the report.
-import { Fragment, useEffect, useMemo, useState, type CSSProperties } from "react"
-import { Link, useSearchParams } from "react-router"
-import { keepPreviousData, useQuery } from "@tanstack/react-query"
+import { Fragment, useEffect, useMemo, useState } from "react"
+import { useSearchParams } from "react-router"
 import { toast } from "sonner"
-import { ArrowLeftRightIcon, BookmarkIcon, BookmarkPlusIcon, ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, DownloadIcon, EllipsisIcon, PlusIcon, SettingsIcon, XIcon } from "lucide-react"
-import type { DateRange, ReportFilter, ReportRow } from "@/api/types"
+import { ArrowLeftRightIcon, BookmarkIcon, BookmarkPlusIcon, ChevronDownIcon, ChevronUpIcon, DownloadIcon, EllipsisIcon, PlusIcon, SettingsIcon, XIcon } from "lucide-react"
+import type { ReportFilter } from "@/api/types"
 import { api } from "@/api/client"
 import { DIMENSIONS, METRICS, METRIC_PRESETS, dimensionDef, metricDef } from "@/api/meta"
 import { useHiddenMetrics, usePeriod } from "@/app/state"
 import { PresetButtons } from "@/components/metric-presets"
+import { Slicer } from "@/components/slicer"
 import { Page, PageHeader, RefreshButton } from "@/components/page"
 import { PeriodSelect } from "@/components/period-select"
 import { downloadCsv } from "@/components/common"
 import { Icon } from "@/components/icon"
-import { ResizeHandle, useColumnWidths } from "@/components/column-resize"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
-import { previousRange } from "@/lib/dates"
-import { fmtMetric, signClass } from "@/lib/format"
-import { DimensionSelect, FilterBuilder, RELAX_HINT, filterText, hasExactFilter } from "./FilterBuilder"
-import { decodeFilters, encodeFilters, fmtDayKey, periodQuery, reportLink, useDictionaries, type Option } from "./shared"
+import { DimensionSelect, FilterBuilder, filterText } from "./FilterBuilder"
+import { decodeFilters, encodeFilters, fmtDayKey, periodQuery, useDictionaries } from "./shared"
+import { ReportGrid } from "./ReportGrid"
 
 const DEFAULT_G = ["campaign"]
 // Same set as the entity lists (confirmed money); «все» variants and EPC are one click away in the metrics picker.
 const DEFAULT_M = METRIC_PRESETS[0].keys
 const MAX_LEVELS = 10
-const CHILD_LIMIT = 50
 
 // Ready groupings: a plain Select in the grouping row. The «PBI» ones repeat the pages of the FacebookNew board
 // and also set its columns.
@@ -63,13 +58,10 @@ const PRESETS: { key: string; label: string; g: string[]; m?: string[]; f?: Repo
   { key: "fb_ad", label: "По объявлениям FB", g: ["fb_ad"] },
 ]
 const METRIC_GROUPS = { traffic: "Трафик", conversions: "Конверсии", money: "Деньги", rates: "Показатели" } as const
-// For these a decrease is good news.
-const LOWER_BETTER = new Set(["cost", "cost_fee", "cpc", "cpa", "cps", "cpm", "install_cost", "i2d", "rejected", "rejected_revenue", "bots"])
 // PBI-like slicers above the table: each one is an «в списке» filter on its field.
 const SLICERS = ["team", "buyer", "country", "approach", "offer_group", "affiliate_network", "agency"]
 
 const csv = (s: string | null) => (s ? s.split(",").filter(Boolean) : [])
-const SEP = "\u0001"
 
 // ---------- saved reports (localStorage) ----------
 
@@ -119,6 +111,7 @@ export default function ReportPage() {
     return [...own.filter((f) => !incoming.some((i) => i.name === f.name && f.operator === "EQUALS")), ...incoming]
   }, [params, incoming])
   const compare = params.get("cmp") === "1"
+  const withExcluded = params.get("ex") === "1"
 
   useEffect(() => {
     if (!incoming.length) return
@@ -149,13 +142,14 @@ export default function ReportPage() {
     p.set("m", m.join(","))
     if (filters.length) p.set("f", encodeFilters(filters))
     if (compare) p.set("cmp", "1")
+    if (withExcluded) p.set("ex", "1")
     return p.toString()
   }
 
   const exportCsv = async () => {
     setExporting(true)
     try {
-      const res = await api.reports.build({ range, dimensions: g, measures: m, filters, sort: [] })
+      const res = await api.reports.build({ range, dimensions: g, measures: m, filters, sort: [], include_excluded: withExcluded })
       downloadCsv(
         `report-${g.join("-")}.csv`,
         [...g.map((d) => dimensionDef(d)?.name ?? d), ...m.map((k) => metricDef(k)?.name ?? k)],
@@ -196,6 +190,10 @@ export default function ReportPage() {
           <Switch checked={compare} onCheckedChange={(v) => update({ cmp: v ? "1" : "" })} />
           <span className="sm:hidden">Сравнить</span><span className="max-sm:hidden">Сравнить с прошлым периодом</span>
         </Label>
+        <Label className="gap-2 text-sm font-normal" title="Кампании с отметкой «Не учитывать в статистике» (тесты, служебные). По умолчанию их нет в отчёте">
+          <Switch checked={withExcluded} onCheckedChange={(v) => update({ ex: v ? "1" : "" })} />
+          Исключённые кампании
+        </Label>
       </div>
 
       <Slicers filters={filters} onChange={setF} />
@@ -213,7 +211,7 @@ export default function ReportPage() {
         </div>
       )}
 
-      <ReportTable key={g.join(",")} dims={g} measures={m} filters={filters} range={range} compare={compare} onRelax={() => setF(filters.map((f) => (f.operator === "EQUALS" ? { ...f, operator: "CONTAINS" as const } : f.operator === "NOT_EQUAL" ? { ...f, operator: "NOT_CONTAIN" as const } : f)))} />
+      <ReportGrid key={g.join(",")} dims={g} measures={m} filters={filters} range={range} compare={compare} withExcluded={withExcluded} onRelax={() => setF(filters.map((f) => (f.operator === "EQUALS" ? { ...f, operator: "CONTAINS" as const } : f.operator === "NOT_EQUAL" ? { ...f, operator: "NOT_CONTAIN" as const } : f)))} />
     </Page>
   )
 }
@@ -241,41 +239,11 @@ function Slicers({ filters, onChange }: { filters: ReportFilter[]; onChange: (f:
       {SLICERS.map((name) => {
         const f = filters.find((x) => x.name === name && x.operator === "IN_LIST")
         const value = f ? (Array.isArray(f.expression) ? f.expression.map(String) : [String(f.expression)]) : []
-        return <Slicer key={name} name={name} options={dict[name] ?? []} value={value} onChange={(v) => set(name, v)} />
+        return <Slicer key={name} label={SLICER_LABEL[name] ?? dimensionDef(name)?.name ?? name} options={dict[name] ?? []} value={value} onChange={(v) => set(name, v)} />
       })}
       {any && <Button variant="ghost" className="max-sm:col-span-2" onClick={() => onChange(filters.filter((f) => !isSlicer(f)))}>Сбросить</Button>}
     </div>
     </>
-  )
-}
-
-function Slicer({ name, options, value, onChange }: { name: string; options: Option[]; value: string[]; onChange: (v: string[]) => void }) {
-  const [q, setQ] = useState("")
-  const label = SLICER_LABEL[name] ?? dimensionDef(name)?.name ?? name
-  const shown = options.filter((o) => o.label.toLowerCase().includes(q.toLowerCase()))
-  const text = !value.length ? "все" : value.length === 1 ? options.find((o) => o.value === value[0])?.value ?? value[0] : `выбрано ${value.length}`
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="outline" className={cn("justify-between font-normal sm:max-w-64", value.length > 0 && "border-primary")}>
-          <span className="truncate"><span className="text-muted-foreground">{label}:</span> {text}</span>
-          <Icon icon={ChevronDownIcon} size={14} className="text-muted-foreground" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-[min(18rem,calc(100vw-1.5rem))] gap-2 p-2">
-        {options.length > 8 && <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск" aria-label={`Поиск: ${label}`} />}
-        <div className="max-h-72 overflow-y-auto">
-          {shown.map((o) => (
-            <Label key={o.value} className="h-8 gap-2 rounded-md px-1 text-sm font-normal">
-              <Checkbox checked={value.includes(o.value)} onCheckedChange={(v) => onChange(v ? [...value, o.value] : value.filter((x) => x !== o.value))} />
-              <span className="truncate">{o.label}</span>
-            </Label>
-          ))}
-          {!shown.length && <p className="p-2 text-xs text-muted-foreground">Ничего не найдено</p>}
-        </div>
-        {value.length > 0 && <Button variant="ghost" onClick={() => onChange([])}>Все {label.toLowerCase()}</Button>}
-      </PopoverContent>
-    </Popover>
   )
 }
 
@@ -439,249 +407,5 @@ function ReportActions({
         <Button disabled={!name.trim()} onClick={submit}>Сохранить</Button>
       </PopoverContent>
     </Popover>
-  )
-}
-
-// ---------- table ----------
-
-interface Ctx {
-  // style of a column the user resized (null = automatic); `fill` = an empty last column takes the free width
-  col: (key: string) => CSSProperties | undefined
-  fill: boolean
-  dims: string[]
-  measures: string[]
-  filters: ReportFilter[]
-  range: DateRange
-  prevRange: DateRange
-  compare: boolean
-  sort: { key: string; desc: boolean } | null
-  expanded: Set<string>
-  toggle: (path: string) => void
-}
-
-function useLevel(ctx: Ctx, level: number, parent: ReportFilter[]) {
-  const { dims, measures, range, prevRange, compare, sort } = ctx
-  const dim = dims[level]
-  const filters = useMemo(() => [...ctx.filters, ...parent], [ctx.filters, parent])
-  const sortReq = sort && (sort.key === "_dim" || measures.includes(sort.key))
-    ? [{ name: sort.key === "_dim" ? dim : sort.key, order: sort.desc ? ("DESC" as const) : ("ASC" as const) }]
-    : []
-  const limit = level === 0 ? undefined : CHILD_LIMIT
-  const cur = useQuery({
-    queryKey: ["report", range, dim, measures, filters, sortReq, limit],
-    queryFn: () => api.reports.build({ range, dimensions: [dim], measures, filters, sort: sortReq, limit }),
-    placeholderData: keepPreviousData,
-  })
-  const prev = useQuery({
-    queryKey: ["report", "prev", prevRange, dim, measures, filters],
-    queryFn: () => api.reports.build({ range: prevRange, dimensions: [dim], measures, filters, sort: [] }),
-    enabled: compare,
-    placeholderData: keepPreviousData,
-  })
-  const prevMap = useMemo(() => {
-    if (!compare || !prev.data || dimensionDef(dim)?.group === "time") return null
-    return new Map(prev.data.rows.map((r) => [String(r[dim]), r]))
-  }, [compare, prev.data, dim])
-  return { cur, prev, prevMap }
-}
-
-function ReportTable({
-  dims, measures, filters, range, compare, onRelax,
-}: { dims: string[]; measures: string[]; filters: ReportFilter[]; range: DateRange; compare: boolean; onRelax: () => void }) {
-  const [sort, setSort] = useState<{ key: string; desc: boolean } | null>(null)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const prevRange = useMemo(() => previousRange(range), [range])
-  // widths per grouping: «Кампания» and «День» need different first columns
-  // the grouping column is the flexible one: it takes the free width, the metrics stay compact on the right
-  const cw = useColumnWidths(`report.${dims.join(">")}`, "_dim")
-  const fill = cw.filler
-  const ctx: Ctx = {
-    col: (key) => (key === "_dim" && !cw.fixed ? { width: "100%" } : cw.styleOf(key, key === "_dim" ? 220 : 110)),
-    fill,
-    dims, measures, filters, range, prevRange, compare, sort, expanded,
-    toggle: (path) => setExpanded((s) => {
-      const n = new Set(s)
-      if (n.has(path)) n.delete(path)
-      else n.add(path)
-      return n
-    }),
-  }
-  const { cur, prev, prevMap } = useLevel(ctx, 0, NO_PARENT)
-  const rows = cur.data?.rows ?? []
-  const colSpan = measures.length + 1 + (fill ? 1 : 0)
-  const fillCell = (cls: string) => fill && <td aria-hidden className={cls} />
-  // the last column has no divider: nothing to its right to give space to
-  const lastKey = measures.at(-1) ?? "_dim"
-
-  const head = (key: string, label: string, right: boolean, title?: string) => (
-    <th
-      key={key}
-      data-col-id={key}
-      title={title}
-      style={ctx.col(key)}
-      className={cn("relative h-9 px-2.5 text-[13px] font-medium whitespace-nowrap text-muted-foreground", right ? "text-right" : "sm:sticky sm:left-0 sm:z-10 bg-background text-left")}
-    >
-      {key !== lastKey && <ResizeHandle active={cw.active === key} onPointerDown={(e) => cw.start(key, e)} onFit={(el) => cw.fit(key, el)} />}
-      <button
-        type="button"
-        data-col-label
-        className={cn("inline-flex items-center gap-1", right && "flex-row-reverse")}
-        onClick={() => setSort(sort?.key === key ? (sort.desc ? { key, desc: false } : null) : { key, desc: true })}
-      >
-        {label}
-        {sort?.key === key && <Icon icon={sort.desc ? ChevronDownIcon : ChevronUpIcon} size={12} />}
-      </button>
-    </th>
-  )
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="overflow-auto rounded-md border">
-        <table className={cn("w-full text-sm", cw.fixed && "table-fixed")} style={cw.tableStyle(["_dim", ...measures], (k) => (k === "_dim" ? 220 : 110))}>
-          <thead className="sticky top-0 z-20 bg-background">
-            <tr className="border-b">
-              {head("_dim", dims.map((d) => dimensionDef(d)?.name ?? d).join(" › "), false)}
-              {measures.map((k) => head(k, metricDef(k)?.short ?? metricDef(k)?.name ?? k, true, metricDef(k)?.name))}
-              {fill && <th aria-hidden className="h-9" />}
-            </tr>
-          </thead>
-          <tbody>
-            {cur.isLoading ? (
-              Array.from({ length: 8 }, (_, i) => (
-                <tr key={i} className="border-b">
-                  {Array.from({ length: colSpan }, (_, j) => <td key={j} className="h-9 px-2.5"><Skeleton className="h-3 w-full" /></td>)}
-                </tr>
-              ))
-            ) : rows.length === 0 ? (
-              <tr>
-                <td colSpan={colSpan} className="h-24 px-2.5 text-center text-muted-foreground">
-                  Нет данных за период и по фильтрам.
-                  {hasExactFilter(filters) && (
-                    <div className="mt-1">
-                      {RELAX_HINT}{" "}
-                      <Button variant="outline" size="sm" onClick={onRelax}>Заменить «равно» на «содержит»</Button>
-                    </div>
-                  )}
-                </td>
-              </tr>
-            ) : (
-              <RowList ctx={ctx} level={0} parent={NO_PARENT} rows={rows} prevMap={prevMap} total={rows.length} />
-            )}
-          </tbody>
-          {cur.data && rows.length > 0 && (
-            <tfoot className="border-t bg-muted font-medium">
-              <tr>
-                <td className="h-9 overflow-hidden bg-muted px-2.5 sm:sticky sm:left-0">Итого</td>
-                {measures.map((k) => (
-                  <MetricCell key={k} k={k} v={cur.data.summary[k]} prev={compare ? prev.data?.summary[k] : undefined} />
-                ))}
-                {fillCell("h-9 bg-muted")}
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-      <div className="min-h-8 text-sm text-muted-foreground">
-        {cur.isLoading ? "Загрузка…" : `Строк: ${cur.data?.total ?? 0}`}
-        {cw.fixed && <> · <button type="button" className="text-link" onClick={cw.reset}>Сбросить ширину колонок</button></>}
-        {compare && prev.data && <> · сравнение с {fmtDayKey(ctx.prevRange.from ?? "")} — {fmtDayKey(ctx.prevRange.to ?? "")}; п.п. — процентные пункты</>}
-        {dims.length > 1 && <> · нажмите строку, чтобы раскрыть уровень «{dimensionDef(dims[1])?.name}»</>}
-      </div>
-    </div>
-  )
-}
-const NO_PARENT: ReportFilter[] = []
-
-function RowList({
-  ctx, level, parent, rows, prevMap, total,
-}: { ctx: Ctx; level: number; parent: ReportFilter[]; rows: ReportRow[]; prevMap: Map<string, ReportRow> | null; total: number }) {
-  const dim = ctx.dims[level]
-  const canExpand = level < ctx.dims.length - 1
-  return (
-    <>
-      {rows.map((row) => {
-        const value = String(row[dim] ?? "—")
-        const path = [...parent.map((f) => String(f.expression)), value].join(SEP)
-        const open = canExpand && ctx.expanded.has(path)
-        const prev = prevMap?.get(value)
-        return (
-          <Fragment key={path}>
-            <tr
-              className={cn("border-b", canExpand && "cursor-pointer")}
-              onClick={canExpand ? () => ctx.toggle(path) : undefined}
-              aria-expanded={canExpand ? open : undefined}
-            >
-              <td className="h-9 overflow-hidden bg-background px-2.5 whitespace-nowrap sm:sticky sm:left-0 sm:z-[1]" title={dim === "day" ? fmtDayKey(value) : value}>
-                <span className="flex min-w-0 items-center gap-1" style={{ paddingLeft: level * 16 }}>
-                  {canExpand ? <Icon icon={open ? ChevronDownIcon : ChevronRightIcon} size={12} className="text-muted-foreground" /> : ctx.dims.length > 1 ? <span className="w-3" /> : null}
-                  <span className={cn("truncate", level === 0 && "font-medium")}>{dim === "day" ? fmtDayKey(value) : value}</span>
-                </span>
-              </td>
-              {ctx.measures.map((k) => <MetricCell key={k} k={k} v={row[k]} prev={prev?.[k]} />)}
-              {ctx.fill && <td aria-hidden />}
-            </tr>
-            {open && <ChildRows ctx={ctx} level={level + 1} parent={[...parent, { name: dim, operator: "EQUALS", expression: value }]} />}
-          </Fragment>
-        )
-      })}
-      {level > 0 && total > rows.length && (
-        <tr className="border-b text-muted-foreground">
-          <td colSpan={ctx.measures.length + 1 + (ctx.fill ? 1 : 0)} className="h-9 px-2.5" style={{ paddingLeft: level * 16 + 28 }}>
-            Показано {rows.length} из {total}.{" "}
-            <Link className="text-link" to={reportLink({ g: ctx.dims.slice(level), filters: [...ctx.filters, ...parent], range: ctx.range })}>
-              Полный отчёт
-            </Link>
-          </td>
-        </tr>
-      )}
-    </>
-  )
-}
-
-function ChildRows({ ctx, level, parent }: { ctx: Ctx; level: number; parent: ReportFilter[] }) {
-  const { cur, prevMap } = useLevel(ctx, level, parent)
-  const pad = { paddingLeft: level * 16 + 28 }
-  const span = ctx.measures.length + 1 + (ctx.fill ? 1 : 0)
-  if (cur.isLoading) return <tr className="border-b"><td colSpan={span} className="h-9 px-2.5 text-muted-foreground" style={pad}>Загрузка…</td></tr>
-  if (!cur.data?.rows.length) return <tr className="border-b"><td colSpan={span} className="h-9 px-2.5 text-muted-foreground" style={pad}>Нет данных</td></tr>
-  return <RowList ctx={ctx} level={level} parent={parent} rows={cur.data.rows} prevMap={prevMap} total={cur.data.total} />
-}
-
-function MetricCell({ k, v, prev }: { k: string; v: string | number | null | undefined; prev?: string | number | null }) {
-  return (
-    <td className="num h-9 overflow-hidden px-2.5 text-right whitespace-nowrap">
-      <div className={signClass(k, v)}>{v == null ? "—" : fmtMetric(k, v)}</div>
-      {prev !== undefined && <Delta k={k} cur={v} prev={prev} />}
-    </td>
-  )
-}
-
-function Delta({ k, cur, prev }: { k: string; cur: string | number | null | undefined; prev: string | number | null }) {
-  if (typeof cur !== "number" || typeof prev !== "number") return null
-  let d: number
-  let text: string
-  const f = (n: number) => (Math.abs(n) < 10 ? n.toFixed(1) : String(Math.round(n))).replace(".", ",")
-  const pp = metricDef(k)?.format === "percent"
-  if (pp) {
-    d = cur - prev
-    text = `${d > 0 ? "+" : ""}${f(d)} п.п.`
-  } else {
-    if (prev === 0) return null
-    d = ((cur - prev) / Math.abs(prev)) * 100
-    text = `${d > 0 ? "+" : ""}${f(d)}%`
-  }
-  const tone = Math.abs(d) < 0.05 ? "text-muted-foreground" : (LOWER_BETTER.has(k) ? d < 0 : d > 0) ? "text-success" : "text-destructive"
-  const prevText = `Прошлый период: ${fmtMetric(k, prev)}`
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div className={cn("text-[11px] leading-3", tone)}>{text}</div>
-      </TooltipTrigger>
-      <TooltipContent>
-        {pp ? <>п.п. — процентные пункты: разница между двумя процентами (8,0% → 9,5% = +1,5 п.п.).<br /></> : null}
-        {LOWER_BETTER.has(k) && <>Для этой метрики снижение — хороший результат.<br /></>}
-        {prevText}
-      </TooltipContent>
-    </Tooltip>
   )
 }

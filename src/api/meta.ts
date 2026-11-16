@@ -3,7 +3,6 @@
 import type {
   AccessLevel,
   ConversionStatus,
-  CostType,
   DateInterval,
   DimensionDef,
   MetricDef,
@@ -140,15 +139,6 @@ export const STREAM_SCHEMAS: { value: StreamSchema; label: string }[] = [
   { value: "landings", label: "Лендинги и офферы" },
   { value: "redirect", label: "Прямой URL" },
   { value: "action", label: "Действие" },
-]
-
-export const COST_TYPES: { value: CostType; label: string }[] = [
-  { value: "CPC", label: "CPC — за клик" },
-  { value: "CPUC", label: "CPuC — за уникальный клик" },
-  { value: "CPM", label: "CPM — за тысячу кликов" },
-  { value: "CPA", label: "CPA — за действие" },
-  { value: "CPS", label: "CPS — за продажу" },
-  { value: "RevShare", label: "RevShare — доля дохода" },
 ]
 
 export const CONVERSION_STATUSES: { value: ConversionStatus; label: string }[] = [

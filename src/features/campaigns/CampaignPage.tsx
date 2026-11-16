@@ -8,7 +8,7 @@ import { ChevronLeftIcon, EllipsisIcon, PlusIcon, XIcon } from "lucide-react"
 import type { Campaign, CampaignParameter, ConversionStatus, S2SPostback, Stream } from "@/api/types"
 import { api } from "@/api/client"
 import { cn } from "@/lib/utils"
-import { COST_TYPES, CONVERSION_STATUSES, CURRENCIES } from "@/api/meta"
+import { CONVERSION_STATUSES } from "@/api/meta"
 import { ApproachSelect } from "./ApproachSelect"
 import { useAccess, usePeriod, useUrlParam } from "@/app/state"
 import { Page } from "@/components/page"
@@ -44,8 +44,13 @@ function CampaignPage({ id }: { id: string | undefined }) {
   const cid = Number(id)
   const qc = useQueryClient()
   const nav = useNavigate()
-  const { canEdit } = useAccess("campaigns")
-  const streamsAccess = useAccess("streams")
+  const roleAccess = useAccess("campaigns")
+  const roleStreams = useAccess("streams")
+  // the server decides per campaign: the role, or a single-object grant (read / edit) on it or its group
+  const myAccess = useQuery({ queryKey: ["campaigns", cid, "access"], queryFn: () => api.campaigns.access(cid) })
+  const canEdit = myAccess.data?.level === "edit"
+  // streams follow the role; when the edit right comes only from a grant, the grant covers the streams too
+  const streamsAccess = { canEdit: canEdit && (roleStreams.canEdit || !roleAccess.canEdit) }
   const [range, setRange] = usePeriod()
   const [tab, setTab] = useUrlParam("tab", "streams")
   const wide = useWide()
@@ -107,7 +112,6 @@ function CampaignPage({ id }: { id: string | undefined }) {
     : !c.alias.trim() ? "Введите идентификатор: без него у кампании нет ссылки"
     : allCampaigns.data?.some((x) => x.id !== c.id && x.alias === c.alias) ? `Идентификатор «${c.alias}» уже занят другой кампанией`
     : !(c.cookies_ttl >= 1 && c.cookies_ttl <= 8760) ? "Срок уникальности — от 1 до 8760 часов"
-    : !(c.traffic_loss >= 0 && c.traffic_loss <= 99) ? "Потери трафика — от 0 до 99%"
     : ""
   const save = useMutation({
     mutationFn: (c: Campaign) => {
@@ -204,7 +208,7 @@ function CampaignPage({ id }: { id: string | undefined }) {
         <code className="min-w-0 flex-1 truncate font-mono" title={url}>{url}</code>
         <CopyButton value={url} label="Копировать" />
         <span className="ml-auto text-muted-foreground">
-          {form.type === "weight" ? "По весу" : "По позиции"} · уникальность {form.cookies_ttl} ч · {form.cost_type}
+          {form.stats_excluded && <span className="text-warning">не в статистике · </span>}уникальность {form.cookies_ttl} ч
         </span>
       </div>
 
@@ -295,6 +299,11 @@ function CampaignPage({ id }: { id: string | undefined }) {
                   </SelectContent>
                 </Select>
               </FormRow>
+              <FormRow label="Статистика" hint="Кампания работает как обычно, но отчёты, дашборд и тренды её не считают, пока в них не включить «Исключённые кампании». Для тестов и служебных кампаний">
+                <Label className="flex items-center gap-2 text-sm font-normal">
+                  <Checkbox checked={form.stats_excluded} onCheckedChange={(v) => set("stats_excluded", !!v)} /> Не учитывать в статистике
+                </Label>
+              </FormRow>
               <FormRow label="Состояние">
                 <label className="flex items-center gap-2 text-sm">
                   <Switch checked={form.state === "active"} onCheckedChange={(v) => set("state", v ? "active" : "disabled")} />
@@ -304,24 +313,7 @@ function CampaignPage({ id }: { id: string | undefined }) {
             </div>
 
             <div>
-              <h3 className="py-2 text-base font-medium">Распределение трафика</h3>
-              <FormRow label="Ротация потоков">
-                <RadioGroup value={form.type} onValueChange={(v) => set("type", v as Campaign["type"])} className="flex gap-4">
-                  <Label className="flex items-center gap-2 font-normal"><RadioGroupItem value="weight" />По весу</Label>
-                  <Label className="flex items-center gap-2 font-normal"><RadioGroupItem value="position" />По позиции</Label>
-                </RadioGroup>
-              </FormRow>
-              <FormRow label="Привязка посетителя" hint="Вернувшийся посетитель попадёт туда же, куда в первый раз, пока действует уникальность">
-                <Select value={form.bind_visitors ?? "none"} onValueChange={(v) => set("bind_visitors", v === "none" ? null : (v as Campaign["bind_visitors"]))} disabled={form.type !== "weight"}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Не привязывать</SelectItem>
-                    <SelectItem value="s">К потоку</SelectItem>
-                    <SelectItem value="sl">К потоку и лендингу</SelectItem>
-                    <SelectItem value="slo">К потоку, лендингу и офферу</SelectItem>
-                  </SelectContent>
-                </Select>
-              </FormRow>
+              <h3 className="py-2 text-base font-medium">Уникальность</h3>
               <FormRow label="Уникальность">
                 <div className="flex flex-col gap-2">
                   <RadioGroup value={form.uniqueness_method} onValueChange={(v) => set("uniqueness_method", v as Campaign["uniqueness_method"])} className="flex flex-wrap gap-4">
@@ -341,37 +333,6 @@ function CampaignPage({ id }: { id: string | undefined }) {
                 </div>
               </FormRow>
 
-              <h3 className="py-2 pt-4 text-base font-medium">Расходы</h3>
-              <FormRow label="Модель оплаты">
-                <Select value={form.cost_type} onValueChange={(v) => set("cost_type", v as Campaign["cost_type"])}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>{COST_TYPES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}</SelectContent>
-                </Select>
-              </FormRow>
-              <FormRow label="Стоимость" hint={form.cost_auto ? "Берётся из параметра cost в ссылке" : "Расход Facebook загружается интеграцией, здесь можно оставить 0"}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input type="number" min={0} step="0.01" className="w-28" value={form.cost_value} disabled={form.cost_auto} onChange={(e) => set("cost_value", Number(e.target.value))} />
-                  <Select value={form.cost_currency} onValueChange={(v) => set("cost_currency", v)}>
-                    <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
-                    <SelectContent>{CURRENCIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                  </Select>
-                  <Label className="flex items-center gap-2 text-sm font-normal">
-                    <Checkbox checked={form.cost_auto} onCheckedChange={(v) => set("cost_auto", !!v)} /> Из параметра cost
-                  </Label>
-                </div>
-              </FormRow>
-              <FormRow label="Потери трафика" hint="Учитываются в цене клика">
-                <div className="flex items-center gap-2">
-                  <Input type="number" min={0} max={99} className="w-20" value={form.traffic_loss} onChange={(e) => set("traffic_loss", Number(e.target.value))} />
-                  <span className="text-sm text-muted-foreground">%</span>
-                </div>
-              </FormRow>
-              <FormRow label="API-токен" hint="Для Click API и интеграций">
-                <div className="flex items-center gap-2">
-                  <Input readOnly value={form.token} className="font-mono" />
-                  <CopyButton value={form.token} />
-                </div>
-              </FormRow>
             </div>
           </fieldset>
         </TabsContent>

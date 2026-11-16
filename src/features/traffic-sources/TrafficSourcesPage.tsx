@@ -106,12 +106,12 @@ export default function TrafficSourcesPage() {
       setEditId("")
     },
   })
-  // Saves the source and copies its parameters and traffic loss into every campaign that uses it.
+  // Saves the source and copies its parameters into every campaign that uses it.
   const apply = useMutation({
     mutationFn: async (v: Partial<TrafficSource> & { id: number }) => {
       await api.trafficSources.update(v.id, v)
       const mine = (campaigns.data ?? []).filter((c) => c.traffic_source_id === v.id)
-      for (const c of mine) await api.campaigns.update(c.id, { parameters: structuredClone(v.parameters ?? []), traffic_loss: v.traffic_loss ?? 0 })
+      for (const c of mine) await api.campaigns.update(c.id, { parameters: structuredClone(v.parameters ?? []) })
       return mine.length
     },
     onSuccess: (n) => {

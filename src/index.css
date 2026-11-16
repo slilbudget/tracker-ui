@@ -192,3 +192,9 @@ tbody:last-of-type > tr:last-child { border-bottom-width: 0; }
 table, table .text-sm { font-size: 13px; line-height: 1.35; }
 table td.h-9, table th.h-9 { height: 32px; }
 table .font-mono { font-size: 12px; }
+
+/* AG Grid (report): cell content centred vertically, numbers on the right */
+.report-grid .ag-cell { display: flex; align-items: center; }
+.report-grid .ag-right-aligned-cell { justify-content: flex-end; }
+.report-grid .ag-cell > *, .report-grid .ag-cell-value { min-width: 0; }
+.report-grid .ag-cell-wrapper, .report-grid .ag-cell-value { height: 100%; width: 100%; }

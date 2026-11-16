@@ -166,9 +166,12 @@ export function filterClicks(req: Pick<ReportRequest, "range" | "filters">) {
   return db.clicks.filter((c) => canSeeCampaign(c.campaign_id) && inRange(c.datetime, rr, tz) && req.filters.every((f) => matches(c, f, tz)))
 }
 
+// campaigns marked «Не учитывать в статистике» (the campaign still works; only the numbers skip it)
+const excluded = (campaignId: number) => !!camp.get(campaignId)?.stats_excluded
+
 export function buildReport(req: ReportRequest): ReportResponse {
   const tz = req.range.timezone
-  const clicks = filterClicks(req)
+  const clicks = filterClicks(req).filter((c) => req.include_excluded || !excluded(c.campaign_id))
   const groups = new Map<string, { dims: string[]; acc: Acc }>()
   const total = empty()
   for (const c of clicks) {
@@ -201,13 +204,15 @@ export function buildReport(req: ReportRequest): ReportResponse {
   return { rows, total: count, summary }
 }
 
-// Per-entity stats used by list pages (campaigns, streams, offers ...).
+// Per-entity stats used by list pages (campaigns, streams, offers ...). An excluded campaign still shows its own numbers
+// (campaign and stream lists) but adds nothing to offers, landings, networks, sources.
 export function statsBy(field: "campaign_id" | "stream_id" | "landing_id" | "offer_id" | "offer_group_id" | "ts_id" | "affiliate_network_id", range: ReportRequest["range"]) {
   const tz = range.timezone
   const rr = resolveRange(range)
   const map = new Map<number, Acc>()
   for (const c of db.clicks) {
     if (!canSeeCampaign(c.campaign_id) || !inRange(c.datetime, rr, tz)) continue
+    if (field !== "campaign_id" && field !== "stream_id" && excluded(c.campaign_id)) continue
     let id: number | null
     if (field === "affiliate_network_id") {
       const o = offr.get(c.offer_id ?? strm.get(c.stream_id)?.offers[0]?.offer_id ?? 0)

@@ -1,6 +1,6 @@
 // «Проверить клик»: which stream a visitor with the given attributes lands in, over the current
 // (possibly unsaved) weights. The real backend evaluates by IP / UA; here the visitor is typed in.
-import type { RotationType, Stream, StreamFilter } from "@/api/types"
+import type { Stream, StreamFilter } from "@/api/types"
 
 export interface Visitor {
   country: string
@@ -36,7 +36,8 @@ function passes(s: Stream, checks: SimCheck[]) {
   return s.filter_or ? known.some(Boolean) : known.every(Boolean)
 }
 
-export function simulate(streams: Stream[], weightOf: (s: Stream) => number, rotation: RotationType, v: Visitor): SimResult {
+// regular streams always rotate by weight (owner 15/11)
+export function simulate(streams: Stream[], weightOf: (s: Stream) => number, v: Visitor): SimResult {
   const active = streams.filter((s) => s.state === "active").sort((a, b) => a.position - b.position)
   const eval_ = (s: Stream): SimStream => {
     const checks = s.filters.map((f) => ({ filter: f, ok: check(f, v) }))
@@ -50,13 +51,10 @@ export function simulate(streams: Stream[], weightOf: (s: Stream) => number, rot
   const f = forced.find((x) => x.passed)
   if (f) { f.chance = 100; return { steps, caughtBy: f.stream, fallback: false } }
 
-  const pool = regular.filter((x) => x.passed && (rotation === "position" || weightOf(x.stream) > 0))
+  const pool = regular.filter((x) => x.passed && weightOf(x.stream) > 0)
   if (pool.length) {
-    if (rotation === "position") pool[0].chance = 100
-    else {
-      const sum = pool.reduce((a, x) => a + weightOf(x.stream), 0)
-      for (const x of pool) x.chance = (weightOf(x.stream) / sum) * 100
-    }
+    const sum = pool.reduce((a, x) => a + weightOf(x.stream), 0)
+    for (const x of pool) x.chance = (weightOf(x.stream) / sum) * 100
     return { steps, caughtBy: null, fallback: false }
   }
   const d = fallback.find((x) => x.passed)

@@ -16,9 +16,6 @@ export interface Group {
 
 // ---------- Campaigns ----------
 
-export type RotationType = "position" | "weight"
-type BindVisitors = null | "s" | "sl" | "slo" // flow / flow+landing / flow+landing+offer
-export type CostType = "CPC" | "CPUC" | "CPM" | "CPA" | "CPS" | "RevShare"
 type UniquenessMethod = "ip" | "ip_ua" | "cookies" | "parameter"
 
 export interface CampaignParameter {
@@ -39,20 +36,16 @@ export interface Campaign {
   name: string
   alias: string
   state: EntityState
-  type: RotationType
-  bind_visitors: BindVisitors
+  // Streams always rotate by weight, and a returning visitor always goes to the same stream, landing and offer
+  // (Keitaro «привязка до оффера»): both fixed by the owner 15/11, so they are not campaign settings.
   group_id: ID | null
   traffic_source_id: ID | null
   domain_id: ID | null
-  cost_type: CostType
-  cost_value: number
-  cost_currency: string
-  cost_auto: boolean
-  traffic_loss: number
   uniqueness_method: UniquenessMethod
   uniqueness_use_cookies: boolean
   cookies_ttl: number // hours
-  token: string
+  // «Не учитывать в статистике»: the campaign keeps working; reports, dashboard and trends leave it out unless asked
+  stats_excluded: boolean
   parameters: CampaignParameter[]
   postbacks: S2SPostback[]
   notes: string
@@ -208,6 +201,7 @@ export interface OfferSwapRow {
   campaign_id: ID
   stream_id: ID
   stream_name: string
+  geo: string[] // countries the stream sends (its country filter; else the campaign's geo)
   before: StreamOffer[]
   after: StreamOffer[]
   filters_before: StreamFilter[]
@@ -328,6 +322,11 @@ export interface Conversion {
   reject_reason: string
   rejected_revenue: number
 }
+// A conversions log row: the conversion + the fields of its click (geo, device, parameters), as in Keitaro's log
+export type ConversionLogRow = Conversion & {
+  click: Pick<Click, "ts_id" | "country" | "region" | "city" | "os" | "browser" | "device_type" | "ip" | "external_id"
+    | "sub_id_1" | "sub_id_2" | "sub_id_3" | "sub_id_4" | "sub_id_5" | "sub_id_6"> | null
+}
 
 type PostbackDirection = "in" | "out"
 export interface PostbackLogEntry {
@@ -393,6 +392,8 @@ export interface ReportRequest {
   sort: { name: string; order: "ASC" | "DESC" }[]
   limit?: number
   offset?: number
+  // campaigns marked «Не учитывать в статистике» are left out unless this is true
+  include_excluded?: boolean
 }
 
 export type ReportRow = Record<string, string | number | null>
@@ -544,12 +545,20 @@ export interface User {
   timezone: string
   language: "ru" | "en"
   group_ids: ID[] // groups of campaigns the user can access when access = groups
+  // Access to single objects on top of the role (owner 15/11): e.g. a buyer sees one campaign of another buyer
+  grants: AccessGrant[]
   last_login_at: ISODate | null
   created_at: ISODate
   two_factor: boolean
   // Handing ad accounts to buyers, a separate permission (not part of the role):
   // all = any account to any buyer, incl. free ones and release; team = between buyers of own team only
   account_transfer: "none" | "team" | "all"
+}
+
+export interface AccessGrant {
+  kind: "campaign" | "campaign_group"
+  id: ID
+  level: "read" | "edit" // read = sees it and its stats; edit = may also change it and its streams
 }
 
 export interface ApiKey {

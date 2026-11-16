@@ -1,7 +1,7 @@
 // «Проверить клик»: pick visitor attributes and see which stream takes the click (with unsaved weights).
 import { useMemo, useState } from "react"
 import { CheckIcon, MinusIcon, XIcon } from "lucide-react"
-import type { RotationType, Stream } from "@/api/types"
+import type { Stream } from "@/api/types"
 import { STREAM_FILTERS, streamFilterDef } from "@/api/meta"
 import { cn } from "@/lib/utils"
 import { fmtPercent } from "@/lib/format"
@@ -18,15 +18,14 @@ const FIELDS = ["country", "region", "device_type", "os", "browser", "language",
 
 const TYPE_TITLE = { forced: "Перехватывающие", regular: "Обычные", default: "Замыкающие" } as const
 
-export function CheckClickDialog({ open, onOpenChange, streams, weightOf, rotation }: {
+export function CheckClickDialog({ open, onOpenChange, streams, weightOf }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   streams: Stream[]
   weightOf: (s: Stream) => number
-  rotation: RotationType
 }) {
   const [v, setV] = useState<Visitor>({ country: "US", region: "", device_type: "mobile", os: "iOS", browser: "Facebook", language: "en", connection_type: "", bot: false })
-  const res = useMemo(() => simulate(streams, weightOf, rotation, v), [streams, weightOf, rotation, v])
+  const res = useMemo(() => simulate(streams, weightOf, v), [streams, weightOf, v])
   const winners = res.steps.filter((s) => s.chance > 0)
 
   return (

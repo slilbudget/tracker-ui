@@ -3,8 +3,8 @@ import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { toast } from "sonner"
-import { EllipsisIcon, PlusIcon, Trash2Icon } from "lucide-react"
-import type { AccessLevel, ApiKey, Resource, Role, User } from "@/api/types"
+import { EllipsisIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react"
+import type { AccessGrant, AccessLevel, ApiKey, Resource, Role, User } from "@/api/types"
 import { ACCESS_LEVELS, METRICS, RESOURCES, TIMEZONES } from "@/api/meta"
 import { api } from "@/api/client"
 
@@ -16,9 +16,11 @@ import { Icon } from "@/components/icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
@@ -97,7 +99,7 @@ function UsersTab({ canEdit }: { canEdit: boolean }) {
         ? api.users.update(v.id, v)
         : api.users.create({
             login: v.login!, name: v.name!, role_id: v.role_id!, team: v.team ?? "", state: v.state ?? "active",
-            timezone: v.timezone ?? "Europe/London", language: v.language ?? "ru", group_ids: v.group_ids ?? [],
+            timezone: v.timezone ?? "Europe/London", language: v.language ?? "ru", group_ids: v.group_ids ?? [], grants: v.grants ?? [],
             last_login_at: null, created_at: new Date().toISOString(), two_factor: false, account_transfer: v.account_transfer ?? "none",
           }),
     onSuccess: (_, v) => {
@@ -128,7 +130,10 @@ function UsersTab({ canEdit }: { canEdit: boolean }) {
         ),
       },
       { accessorKey: "name", header: "Имя", meta: { grow: true } },
-      { id: "role", header: "Роль", accessorFn: (u) => roleName(u.role_id) },
+      {
+        id: "role", header: "Роль", accessorFn: (u) => roleName(u.role_id),
+        cell: ({ row }) => <>{roleName(row.original.role_id)}{row.original.grants.length > 0 && <span className="text-muted-foreground" title="Отдельные доступы к кампаниям и группам"> + доступов: {row.original.grants.length}</span>}</>,
+      },
       { id: "team", header: "Команда", accessorFn: (u) => u.team || "—" },
       { id: "state", header: "Состояние", accessorFn: (u) => (u.state === "active" ? "Активен" : "Отключён"), cell: ({ row }) => <span className={cn(row.original.state !== "active" && "text-muted-foreground")}>{row.original.state === "active" ? "Активен" : "Отключён"}</span> },
       { id: "two_factor", header: "2FA", accessorFn: (u) => (u.two_factor ? 1 : 0), cell: ({ row }) => (row.original.two_factor ? "Да" : <span className="text-warning">Нет</span>) },
@@ -253,7 +258,7 @@ function UserSheet({
     setErr({})
     setTempPass("")
     setNewTeam(false)
-    setForm(user ?? { login: "", name: "", password: "", role_id: (roles.find((r) => r.name === "Байер") ?? roles.filter((r) => !r.system).at(-1) ?? roles[0])?.id, team: "", state: "active", timezone: "Europe/London", language: "ru", group_ids: [], account_transfer: "none" })
+    setForm(user ?? { login: "", name: "", password: "", role_id: (roles.find((r) => r.name === "Байер") ?? roles.filter((r) => !r.system).at(-1) ?? roles[0])?.id, team: "", state: "active", timezone: "Europe/London", language: "ru", group_ids: [], grants: [], account_transfer: "none" })
   }
   if (!open && loadedKey !== null) setLoadedKey(null)
   const set = <K extends keyof User>(k: K, v: User[K]) => setForm((f) => ({ ...f, [k]: v }))
@@ -363,6 +368,9 @@ function UserSheet({
             />
           </FormRow>
         )}
+        <FormRow label="Отдельные доступы" hint="Сверх роли: конкретная кампания или группа кампаний. Например, байеру — одна чужая кампания только на просмотр">
+          <GrantsEditor value={form.grants ?? []} onChange={(v) => set("grants", v)} groups={groups} disabled={readOnly} />
+        </FormRow>
         <FormRow label="Передача кабинетов" hint="Отдельное право, не зависит от роли. Тимлиду обычно — «Внутри своей команды»">
           <Select value={form.account_transfer ?? "none"} onValueChange={(v) => set("account_transfer", v as User["account_transfer"])}>
             <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
@@ -388,6 +396,69 @@ function UserSheet({
         </FormRow>
       </fieldset>
     </EntitySheet>
+  )
+}
+
+// Single-object access on top of the role: a campaign or a campaign group, read or edit.
+function GrantsEditor({ value, onChange, groups, disabled }: {
+  value: AccessGrant[]; onChange: (v: AccessGrant[]) => void; groups: { id: number; name: string }[]; disabled: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const campaigns = useQuery({ queryKey: ["campaigns"], queryFn: api.campaigns.list })
+  const name = (g: AccessGrant) =>
+    g.kind === "campaign" ? campaigns.data?.find((c) => c.id === g.id)?.name ?? `Кампания #${g.id}` : groups.find((x) => x.id === g.id)?.name ?? `Группа #${g.id}`
+  const has = (kind: AccessGrant["kind"], id: number) => value.some((g) => g.kind === kind && g.id === id)
+  const add = (kind: AccessGrant["kind"], id: number) => {
+    if (!has(kind, id)) onChange([...value, { kind, id, level: "read" }])
+    setOpen(false)
+  }
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      {value.map((g, i) => (
+        <div key={`${g.kind}-${g.id}`} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md border py-1 pr-1 pl-2">
+          <span className="min-w-0 basis-full text-sm break-words">
+            <span className="text-xs text-muted-foreground">{g.kind === "campaign" ? "Кампания" : "Группа кампаний"} · </span>{name(g)}
+          </span>
+          <Select value={g.level} onValueChange={(v) => onChange(value.map((x, j) => (j === i ? { ...x, level: v as AccessGrant["level"] } : x)))} disabled={disabled}>
+            <SelectTrigger className="w-48 shrink-0" aria-label={`Доступ: ${name(g)}`}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="read">Просмотр и статистика</SelectItem>
+              <SelectItem value="edit">Изменение</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button type="button" variant="ghost" size="icon" className="ml-auto" aria-label={`Убрать доступ: ${name(g)}`} disabled={disabled} onClick={() => onChange(value.filter((_, j) => j !== i))}>
+            <Icon icon={XIcon} />
+          </Button>
+        </div>
+      ))}
+      {!disabled && (
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button type="button" variant="outline" className="self-start"><Icon icon={PlusIcon} /> Добавить доступ</Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-[min(22rem,calc(100vw-1.5rem))] p-0">
+            <Command>
+              <CommandInput placeholder="Кампания или группа" />
+              <CommandList>
+                <CommandEmpty>Ничего не найдено</CommandEmpty>
+                <CommandGroup heading="Группы кампаний">
+                  {groups.filter((x) => !has("campaign_group", x.id)).map((x) => (
+                    <CommandItem key={`g${x.id}`} value={`группа ${x.name} ${x.id}`} onSelect={() => add("campaign_group", x.id)}>{x.name}</CommandItem>
+                  ))}
+                </CommandGroup>
+                <CommandGroup heading="Кампании">
+                  {(campaigns.data ?? []).filter((c) => !has("campaign", c.id)).map((c) => (
+                    <CommandItem key={`c${c.id}`} value={`${c.name} ${c.id}`} onSelect={() => add("campaign", c.id)}>
+                      <span className="truncate">{c.name}</span><span className="ml-auto text-xs text-muted-foreground">#{c.id}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
+      )}
+    </div>
   )
 }
 

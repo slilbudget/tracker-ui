@@ -217,7 +217,7 @@ export function StreamsTab({
         </div>
       )}
 
-      <CheckClickDialog open={checkOpen} onOpenChange={setCheckOpen} streams={all} weightOf={weightOf} rotation={campaign.type} />
+      <CheckClickDialog open={checkOpen} onOpenChange={setCheckOpen} streams={all} weightOf={weightOf} />
 
       <div className="overflow-x-auto rounded-md border">
         <table className="w-full border-separate border-spacing-0 text-sm [&_td]:border-b [&_th]:border-b">

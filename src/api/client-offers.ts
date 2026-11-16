@@ -83,8 +83,10 @@ function swapRows(q: OfferSwapRequest): OfferSwapRow[] {
         const stillNeeded = after.some((x) => sameSet(db.offers.find((o) => o.id === x.offer_id)?.regions ?? [], from.regions))
         if (!stillNeeded) filtersAfter = s.filters.filter((f) => !(f.name === "region" && f.mode === "accept" && sameSet(f.payload, from.regions)))
       }
+      const country = s.filters.find((f) => f.name === "country" && f.mode === "accept")?.payload
+      const prefix = db.campaigns.find((c) => c.id === s.campaign_id)?.name.match(/^([A-Z]{2})\b/)?.[1]
       return {
-        campaign_id: s.campaign_id, stream_id: s.id, stream_name: s.name,
+        campaign_id: s.campaign_id, stream_id: s.id, stream_name: s.name, geo: country?.length ? country : prefix ? [prefix] : [],
         before: s.offers, after, filters_before: s.filters, filters_after: filtersAfter,
       }
     })

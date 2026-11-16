@@ -1,4 +1,5 @@
 // Conversions log: period, status, campaign, partner network, buyer, search by subid / tid; server-like pagination (api.conversions.log).
+// Column settings: every field of the conversion and of its click, in the chosen order.
 // Row → side sheet (full data, status / payout change with a reason); bulk «Подтвердить» / «Отклонить»;
 // «Загрузить конверсии» (CSV text) and «Выгрузить CSV». Money columns are hidden for roles without money access.
 import { useMemo, useState } from "react"
@@ -7,7 +8,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { toast } from "sonner"
 import { CheckIcon, DownloadIcon, UploadIcon, XIcon } from "lucide-react"
-import type { Conversion, ConversionStatus } from "@/api/types"
+import type { ConversionLogRow, ConversionStatus } from "@/api/types"
 import { api } from "@/api/client"
 import { CONVERSION_STATUSES, rejectReasonLabel } from "@/api/meta"
 import { useAccess, useApp, useCanSeeMoney, usePeriod, useUrlParam } from "@/app/state"
@@ -17,12 +18,16 @@ import { PeriodSelect } from "@/components/period-select"
 import { SearchInput, downloadCsv } from "@/components/common"
 import { Icon } from "@/components/icon"
 import { Button } from "@/components/ui/button"
+import { ColumnsButton, useColumnChoice, type ColumnChoice } from "@/components/columns-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { formatDateTime } from "@/lib/dates"
 import { fmtMoney } from "@/lib/format"
 import { BulkStatusDialog, ConversionSheet, duration } from "./ConversionSheet"
+import { DEVICE } from "./ClickSheet"
 import { ImportSheet } from "./ImportSheet"
-import { CampaignSelect, Clip, ConversionStatusCell, EntityName, STATUS_SHORT, useColumnPrefixes, usePage, useNames } from "./shared"
+import { CampaignSelect, Clip, ConversionStatusCell, EntityName, STATUS_SHORT, SUBS, SUB_ALIASES, useColumnPrefixes, usePage, useNames } from "./shared"
+
+const DEFAULT_COLS = ["campaign", "buyer", "landing", "offer", "network", "status", "reject_reason", "revenue"]
 
 export default function ConversionsLogPage() {
   const { timezone } = useApp()
@@ -62,58 +67,71 @@ export default function ConversionsLogPage() {
   // one update for all keys (several useUrlParam setters in a row overwrite each other)
   const resetFilters = () => setParams((p) => { const n = new URLSearchParams(p); ["status", "c", "net", "buyer", "q"].forEach((k) => n.delete(k)); return n }, { replace: true })
 
-  const columns = useMemo<ColumnDef<Conversion, unknown>[]>(() => {
+  // every field of the log + the fields of the click (Keitaro-like column settings); postback time and subid always shown
+  const catalog = useMemo(() => {
     const nm = names.data
-    const col = (id: string, header: string, accessorFn: (c: Conversion) => string | number | null | undefined, extra: Partial<ColumnDef<Conversion, unknown>> = {}) =>
-      ({ id, header, accessorFn, enableSorting: false, ...extra }) as ColumnDef<Conversion, unknown>
-    return [
-      col("postback", "Время постбека", (c) => formatDateTime(c.postback_datetime, timezone), { enableHiding: false }),
-      col("sub_id", "Subid", (c) => c.sub_id, {
-        cell: ({ row }) => <span className="font-mono">{row.original.sub_id}</span>,
-      }),
-      col("click_time", "Время клика", (c) => formatDateTime(c.click_datetime, timezone)),
-      col("ttc", "До конверсии", (c) => duration(Date.parse(c.postback_datetime) - Date.parse(c.click_datetime)), { meta: { align: "right" } }),
-      col("campaign", "Кампания", (c) => nm?.campaigns[c.campaign_id] ?? c.campaign_id, {
-        cell: ({ row }) => <Clip><EntityName id={row.original.campaign_id} name={nm?.campaigns[row.original.campaign_id]} prefix={pre.campaign} /></Clip>,
-      }),
-      col("buyer", "Байер", (c) => nm?.buyers[nm.campaignOwner[c.campaign_id]] ?? "—"),
-      col("stream", "Поток", (c) => nm?.streams[c.stream_id] ?? c.stream_id, {
-        cell: ({ row }) => <Clip><EntityName id={row.original.stream_id} name={nm?.streams[row.original.stream_id]} prefix={pre.stream} /></Clip>,
-      }),
-      col("landing", "Лендинг", (c) => (c.landing_id ? nm?.landings[c.landing_id] ?? c.landing_id : "—"), {
-        cell: ({ row }) => <Clip><EntityName id={row.original.landing_id} name={row.original.landing_id ? nm?.landings[row.original.landing_id] : undefined} prefix={pre.landing} /></Clip>,
-      }),
-      col("offer", "Оффер", (c) => (c.offer_id ? nm?.offers[c.offer_id] ?? c.offer_id : "—"), {
-        meta: { grow: true },
-        cell: ({ row }) => <Clip><EntityName id={row.original.offer_id} name={row.original.offer_id ? nm?.offers[row.original.offer_id] : undefined} prefix={pre.offer} /></Clip>,
-      }),
-      ...(seeNetworks
-        ? [col("network", "Партнёрка", (c) => (c.offer_id ? nm?.networks[nm.offerNetwork[c.offer_id]] ?? "—" : "—"))]
-        : []),
-      col("status", "Статус", (c) => c.status, {
-        cell: ({ row }) => <ConversionStatusCell status={row.original.status} />,
-      }),
-      col("original_status", "Исходный статус", (c) => c.original_status, { cell: ({ row }) => <span className="text-muted-foreground">{row.original.original_status}</span> }),
-      col("previous_status", "Предыдущий", (c) => (c.previous_status ? STATUS_SHORT[c.previous_status] : "—")),
-      col("reject_reason", "Причина отклонения", (c) => c.reject_reason || "—", {
-        cell: ({ row }) => row.original.reject_reason
-          ? <span title={rejectReasonLabel(row.original.reject_reason)}>{row.original.reject_reason}</span>
-          : <span className="text-muted-foreground">—</span>,
-      }),
-      ...(money
-        ? [col("revenue", "Выплата", (c) => c.revenue, {
-            meta: { align: "right" },
-            cell: ({ row }) => {
-              const c = row.original
-              return c.status === "sale" && c.revenue === 0
-                ? <span className="font-medium text-destructive" title="Продажа без выплаты: проверьте оффер и постбек">0 $</span>
-                : fmtMoney(c.revenue)
-            },
-          })]
-        : []),
-      col("tid", "TID", (c) => c.tid, { cell: ({ row }) => <span className="font-mono">{row.original.tid}</span> }),
-    ]
+    type R = ConversionLogRow
+    const defs: (ColumnChoice & { col: ColumnDef<R, unknown> })[] = []
+    const add = (group: string, id: string, label: string, accessorFn: (c: R) => string | number | null | undefined, extra: Partial<ColumnDef<R, unknown>> = {}, header = label) =>
+      defs.push({ id, label, group, col: { id, header, accessorFn, enableSorting: false, enableHiding: false, ...extra } as ColumnDef<R, unknown> })
+    const entity = (id: number | null, name: string | undefined, prefix: string) => <Clip><EntityName id={id} name={name} prefix={prefix} /></Clip>
+    const mono = (v: string) => <span className="font-mono">{v}</span>
+    add("Основные", "postback", "Время постбека", (c) => formatDateTime(c.postback_datetime, timezone))
+    add("Основные", "sub_id", "Subid", (c) => c.sub_id, { cell: ({ row }) => mono(row.original.sub_id) })
+    add("Основные", "click_time", "Время клика", (c) => formatDateTime(c.click_datetime, timezone))
+    add("Основные", "ttc", "До конверсии", (c) => duration(Date.parse(c.postback_datetime) - Date.parse(c.click_datetime)), { meta: { align: "right" } })
+    add("Основные", "campaign", "Кампания", (c) => nm?.campaigns[c.campaign_id] ?? c.campaign_id, { cell: ({ row }) => entity(row.original.campaign_id, nm?.campaigns[row.original.campaign_id], pre.campaign) })
+    add("Основные", "buyer", "Байер", (c) => nm?.buyers[nm.campaignOwner[c.campaign_id]] ?? "—")
+    add("Основные", "stream", "Поток", (c) => nm?.streams[c.stream_id] ?? c.stream_id, { cell: ({ row }) => entity(row.original.stream_id, nm?.streams[row.original.stream_id], pre.stream) })
+    add("Основные", "landing", "Лендинг", (c) => (c.landing_id ? nm?.landings[c.landing_id] ?? c.landing_id : "—"), {
+      cell: ({ row }) => entity(row.original.landing_id, row.original.landing_id ? nm?.landings[row.original.landing_id] : undefined, pre.landing),
+    })
+    add("Основные", "offer", "Оффер", (c) => (c.offer_id ? nm?.offers[c.offer_id] ?? c.offer_id : "—"), {
+      meta: { grow: true }, cell: ({ row }) => entity(row.original.offer_id, row.original.offer_id ? nm?.offers[row.original.offer_id] : undefined, pre.offer),
+    })
+    if (seeNetworks) add("Основные", "network", "Партнёрка", (c) => (c.offer_id ? nm?.networks[nm.offerNetwork[c.offer_id]] ?? "—" : "—"))
+    add("Основные", "ts", "Источник", (c) => (c.click?.ts_id ? nm?.sources[c.click.ts_id] ?? c.click.ts_id : "—"))
+    add("Статус", "status", "Статус", (c) => c.status, { cell: ({ row }) => <ConversionStatusCell status={row.original.status} /> })
+    add("Статус", "original_status", "Исходный статус", (c) => c.original_status, { cell: ({ row }) => <span className="text-muted-foreground">{row.original.original_status}</span> })
+    add("Статус", "previous_status", "Предыдущий статус", (c) => (c.previous_status ? STATUS_SHORT[c.previous_status] : "—"), {}, "Предыдущий")
+    add("Статус", "reject_reason", "Причина отклонения", (c) => c.reject_reason || "—", {
+      cell: ({ row }) => row.original.reject_reason
+        ? <span title={rejectReasonLabel(row.original.reject_reason)}>{row.original.reject_reason}</span>
+        : <span className="text-muted-foreground">—</span>,
+    })
+    if (money) {
+      add("Деньги", "revenue", "Выплата", (c) => c.revenue, {
+        meta: { align: "right" },
+        cell: ({ row }) => {
+          const c = row.original
+          return c.status === "sale" && c.revenue === 0
+            ? <span className="font-medium text-destructive" title="Продажа без выплаты: проверьте оффер и постбек">0 $</span>
+            : fmtMoney(c.revenue)
+        },
+      })
+      add("Деньги", "rejected_revenue", "Потерянная выплата", (c) => c.rejected_revenue, { meta: { align: "right" }, cell: ({ row }) => (row.original.rejected_revenue ? fmtMoney(row.original.rejected_revenue) : "—") })
+    }
+    add("ID", "tid", "TID", (c) => c.tid, { cell: ({ row }) => mono(row.original.tid) })
+    add("ID", "conversion_id", "ID конверсии", (c) => c.conversion_id, { cell: ({ row }) => mono(row.original.conversion_id) })
+    add("ID", "campaign_id", "ID кампании", (c) => c.campaign_id, { meta: { align: "right" } })
+    add("ID", "stream_id", "ID потока", (c) => c.stream_id, { meta: { align: "right" } })
+    add("ID", "offer_id", "ID оффера", (c) => c.offer_id ?? "—", { meta: { align: "right" } })
+    add("ID", "external_id", "External ID", (c) => c.click?.external_id ?? "—", { cell: ({ row }) => mono(row.original.click?.external_id ?? "—") })
+    for (const k of SUBS) add("Параметры клика", k, `${k} · ${SUB_ALIASES[k]}`, (c) => c.click?.[k] ?? "—", {}, SUB_ALIASES[k])
+    add("Гео и устройство", "country", "Страна", (c) => c.click?.country ?? "—")
+    add("Гео и устройство", "region", "Регион", (c) => c.click?.region ?? "—")
+    add("Гео и устройство", "city", "Город", (c) => c.click?.city ?? "—")
+    add("Гео и устройство", "device", "Устройство", (c) => (c.click ? DEVICE[c.click.device_type] ?? c.click.device_type : "—"))
+    add("Гео и устройство", "os", "ОС", (c) => c.click?.os ?? "—")
+    add("Гео и устройство", "browser", "Браузер", (c) => c.click?.browser ?? "—")
+    add("Гео и устройство", "ip", "IP", (c) => c.click?.ip ?? "—", { cell: ({ row }) => mono(row.original.click?.ip ?? "—") })
+    return defs
   }, [names.data, timezone, money, pre, seeNetworks])
+  const choice = useColumnChoice("conversions", catalog, DEFAULT_COLS)
+  const columns = useMemo(
+    () => ["postback", "sub_id", ...choice.visible].map((id) => catalog.find((d) => d.id === id)?.col).filter((c): c is ColumnDef<ConversionLogRow, unknown> => !!c),
+    [catalog, choice.visible],
+  )
 
   const [exporting, setExporting] = useState(false)
   const exportCsv = async () => {
@@ -188,7 +206,12 @@ export default function ConversionsLogPage() {
             <SearchInput value={q} onChange={setQ} placeholder="Subid или TID" />
           </>
         }
-        right={<PeriodSelect value={range} onChange={setRange} />}
+        right={
+          <>
+            <ColumnsButton all={catalog} value={choice.visible} defaults={DEFAULT_COLS} fixed={["postback", "sub_id"]} onChange={choice.setVisible} />
+            <PeriodSelect value={range} onChange={setRange} />
+          </>
+        }
       />
       <DataTable
         data={log.data?.rows}
@@ -210,8 +233,7 @@ export default function ConversionsLogPage() {
               )
             : undefined
         }
-        storageKey="conversions-log.v3"
-        initialHidden={["click_time", "ttc", "stream", "original_status", "previous_status", "tid"]}
+        storageKey="conversions-log.v4"
         serverPaging={{ total: log.data?.total ?? 0, pageIndex: pg.page, pageSize: pg.size, onPageChange: pg.setPage, onPageSizeChange: pg.setSize }}
         empty="Конверсий нет за выбранный период"
         onResetFilters={filtered ? resetFilters : undefined}

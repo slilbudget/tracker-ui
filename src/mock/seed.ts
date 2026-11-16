@@ -102,14 +102,14 @@ const NAMES: Record<string, string> = {
 }
 
 export const users: User[] = [
-  { id: 1, login: "admin", name: "Администратор", role_id: 1, team: "—", state: "active", timezone: "Europe/London", language: "ru", group_ids: [], last_login_at: iso(daysAgo(0.1)), created_at: iso(daysAgo(200)), two_factor: true, account_transfer: "all" },
-  { id: 2, login: "lead_alpha", name: "Игорь Смирнов", role_id: 2, team: "Alpha", state: "active", timezone: "Europe/London", language: "ru", group_ids: [1, 2, 3, 4], last_login_at: iso(daysAgo(0.3)), created_at: iso(daysAgo(150)), two_factor: true, account_transfer: "team" },
-  { id: 3, login: "lead_bravo", name: "Ольга Кузнецова", role_id: 2, team: "Bravo", state: "active", timezone: "Europe/Warsaw", language: "ru", group_ids: [5, 6, 7, 8], last_login_at: iso(daysAgo(1.2)), created_at: iso(daysAgo(140)), two_factor: false, account_transfer: "team" },
-  { id: 4, login: "finance", name: "Елена Попова", role_id: 4, team: "—", state: "active", timezone: "Europe/London", language: "ru", group_ids: [], last_login_at: iso(daysAgo(2)), created_at: iso(daysAgo(120)), two_factor: true, account_transfer: "none" },
+  { id: 1, login: "admin", name: "Администратор", role_id: 1, team: "—", state: "active", timezone: "Europe/London", language: "ru", group_ids: [], last_login_at: iso(daysAgo(0.1)), created_at: iso(daysAgo(200)), two_factor: true, account_transfer: "all", grants: [] },
+  { id: 2, login: "lead_alpha", name: "Игорь Смирнов", role_id: 2, team: "Alpha", state: "active", timezone: "Europe/London", language: "ru", group_ids: [1, 2, 3, 4], last_login_at: iso(daysAgo(0.3)), created_at: iso(daysAgo(150)), two_factor: true, account_transfer: "team", grants: [] },
+  { id: 3, login: "lead_bravo", name: "Ольга Кузнецова", role_id: 2, team: "Bravo", state: "active", timezone: "Europe/Warsaw", language: "ru", group_ids: [5, 6, 7, 8], last_login_at: iso(daysAgo(1.2)), created_at: iso(daysAgo(140)), two_factor: false, account_transfer: "team", grants: [] },
+  { id: 4, login: "finance", name: "Елена Попова", role_id: 4, team: "—", state: "active", timezone: "Europe/London", language: "ru", group_ids: [], last_login_at: iso(daysAgo(2)), created_at: iso(daysAgo(120)), two_factor: true, account_transfer: "none", grants: [] },
   ...BUYERS.map((b, i): User => ({
     id: 10 + i, login: b, name: NAMES[b], role_id: i === 7 ? 5 : 3, team: i < 4 ? "Alpha" : "Bravo",
     state: i === 6 ? "disabled" : "active", timezone: "Europe/London", language: "ru", group_ids: [i + 1],
-    last_login_at: i === 6 ? iso(daysAgo(40)) : iso(daysAgo(r() * 3)), created_at: iso(daysAgo(between(20, 180))), two_factor: r() > 0.4, account_transfer: "none",
+    last_login_at: i === 6 ? iso(daysAgo(40)) : iso(daysAgo(r() * 3)), created_at: iso(daysAgo(between(20, 180))), two_factor: r() > 0.4, account_transfer: "none", grants: [],
   })),
 ]
 
@@ -334,9 +334,9 @@ const CAMPAIGN_DEFS: [string, number, "US" | "BR", Campaign["state"], string][] 
 ]
 CAMPAIGN_DEFS.forEach(([name, b, geo, state, approach], i) => {
   const c: Campaign = {
-    id: 2552 + i * 7, name, alias: hex(8), state, type: "weight", bind_visitors: "slo", group_id: b + 1,
-    traffic_source_id: 2, domain_id: (i % 2) + 1, cost_type: "CPC", cost_value: 0, cost_currency: "USD", cost_auto: false,
-    traffic_loss: 0, uniqueness_method: "ip_ua", uniqueness_use_cookies: true, cookies_ttl: 1440, token: hex(16),
+    id: 2552 + i * 7, name, alias: hex(8), state, group_id: b + 1,
+    traffic_source_id: 2, domain_id: (i % 2) + 1,
+    uniqueness_method: "ip_ua", uniqueness_use_cookies: true, cookies_ttl: 1440, stats_excluded: approach === "UGC" && geo === "US" && b === 7,
     parameters: [
       ...fbParams,
       { name: "sub_id_5", alias: "Пиксель", placeholder: "{fbp}" },
@@ -352,6 +352,9 @@ CAMPAIGN_DEFS.forEach(([name, b, geo, state, approach], i) => {
   makeStreams(c, geo === "US" ? between(12, 22) : 1, geo)
 })
 // Reference campaign: streams and offers are set up here once and copied into the linked campaigns.
+// a_volkov watches one campaign of m_orlova (read only): a single-object grant on top of the role
+users.find((u) => u.login === "a_volkov")!.grants = [{ kind: "campaign", id: campaigns.find((c) => c.name.includes("m_orlova"))!.id, level: "read" }]
+
 {
   const base = campaigns[0]
   const t: Campaign = {

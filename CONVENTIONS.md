@@ -6,7 +6,7 @@ Users: buyers, team leads, finance, admins. They live in tables all day: speed o
 ## Stack
 
 React 19 + TS + Vite, Tailwind v4, shadcn/ui (preset radix-mira, compact), TanStack Query v5, TanStack Table v8,
-react-router v8 (hash router), lucide-react icons (directly or via `@/components/icon`). Besides shadcn, only recharts (charts), sonner (toasts), cmdk (search) and react-day-picker (calendar).
+react-router v8 (hash router), lucide-react icons (directly or via `@/components/icon`). Besides shadcn, only recharts (charts), sonner (toasts), cmdk (search), react-day-picker (calendar) and AG Grid Community (the report table only, `features/reports/ReportGrid.tsx`; every other table is DataTable).
 
 ## Design rules (strict, from the product owner)
 
@@ -34,7 +34,7 @@ react-router v8 (hash router), lucide-react icons (directly or via `@/components
 - `src/features/<section>/` one folder per section. Do not edit other sections' folders.
 - Shared: `components/page.tsx` (Page, PageHeader, Toolbar, Section), `components/data-table.tsx` (DataTable),
   `components/common.tsx` (StateDot, SearchInput, StateFilter, metricColumns, metricSummary, ConfirmDialog, EntitySheet, FormRow,
-  CopyButton, downloadCsv), `components/period-select.tsx`, `app/state.tsx` (useAccess, useHiddenMetrics, usePeriod, useUrlParam).
+  CopyButton, downloadCsv), `components/period-select.tsx`, `components/slicer.tsx` («Поле: все ▾» multi-pick), `components/columns-dialog.tsx` (log column settings: all fields by group + order), `app/state.tsx` (useAccess, useHiddenMetrics, usePeriod, useUrlParam).
 - Reference implementation of a list section: `src/features/landings/LandingsPage.tsx`. Copy its structure.
 
 ## Patterns

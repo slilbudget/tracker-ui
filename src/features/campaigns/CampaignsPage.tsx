@@ -78,9 +78,8 @@ export default function CampaignsPage() {
     mutationFn: async ({ template_id, ...c }: Pick<Campaign, "name" | "domain_id" | "group_id" | "traffic_source_id" | "template_id" | "approach">) => {
       const src = sources.data?.find((s) => s.id === c.traffic_source_id)
       const created = await api.campaigns.create({
-        ...c, is_template: false, template_id, alias: Math.random().toString(36).slice(2, 10), state: "active", type: "weight", bind_visitors: "slo",
-        cost_type: "CPC", cost_value: 0, cost_currency: "USD", cost_auto: false, traffic_loss: 0, uniqueness_method: "ip_ua",
-        uniqueness_use_cookies: true, cookies_ttl: 24, token: Math.random().toString(16).slice(2, 18),
+        ...c, is_template: false, template_id, alias: Math.random().toString(36).slice(2, 10), state: "active", uniqueness_method: "ip_ua",
+        uniqueness_use_cookies: true, cookies_ttl: 24, stats_excluded: false,
         parameters: src ? structuredClone(src.parameters) : [], postbacks: [], notes: "", owner_id: 0, // the API sets the owner from the session
         created_at: "", updated_at: "",
       })
@@ -106,6 +105,7 @@ export default function CampaignsPage() {
           <span className="flex min-w-0 items-center gap-2">
             <EntityName state={row.original.state} name={row.original.name} />
             {row.original.is_template && <span className="shrink-0 rounded-sm border px-1 text-xs text-muted-foreground">эталон</span>}
+            {row.original.stats_excluded && <span className="shrink-0 rounded-sm border px-1 text-xs text-warning" title="Не учитывается в отчётах, дашборде и трендах">не в статистике</span>}
           </span>
         ),
       },

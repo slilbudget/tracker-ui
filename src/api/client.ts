@@ -1,13 +1,13 @@
 // API client. Today it answers from the in-memory mock; each function is one backend endpoint.
 // Swap the bodies for fetch() calls when the Go API is ready, keeping the signatures.
 import type {
-  AffiliateNetwork, ApiKey, AuditEntry, Campaign, Click, Conversion, DateRange, Domain, Group, GroupType, ID,
+  AffiliateNetwork, ApiKey, AuditEntry, Campaign, Click, Conversion, ConversionLogRow, DateRange, Domain, Group, GroupType, ID,
   Landing, Offer, PostbackLogEntry, ReportFilter, ReportRequest, ReportResponse, Role, Settings,
   Stream, TrafficSource, User,
 } from "./types"
 import * as db from "@/mock/seed"
 import { buildReport, filterClicks, statsBy } from "@/mock/report"
-import { canSeeCampaign, viewerGroupIds, viewerUser } from "@/mock/scope"
+import { campaignAccess, canSeeCampaign, viewerGroupIds, viewerUser } from "@/mock/scope"
 import { inRange, resolveRange } from "@/lib/dates"
 import { offersApi } from "./client-offers"
 import { fbApi, problemsApi } from "./client-problems"
@@ -77,6 +77,15 @@ export const api = {
     get: (id: ID) => {
       const c = db.campaigns.find((x) => x.id === id)
       return c && c.state !== "deleted" && canSeeCampaign(id) ? wait(c) : Promise.reject(new ApiError("Кампания не найдена"))
+    },
+    // what the viewer may do with this campaign: by the role, or by a single-object grant (Users → «Отдельные доступы»)
+    access: (id: ID) => wait({ level: campaignAccess(id) }),
+    update: (id: ID, patch: Partial<Campaign>) => {
+      const c = db.campaigns.find((x) => x.id === id)
+      if (!c || campaignAccess(id) === "none") return Promise.reject(new ApiError("Кампания не найдена"))
+      if (campaignAccess(id) !== "edit") return Promise.reject(new ApiError("Только просмотр: у вас нет права менять эту кампанию"))
+      Object.assign(c, patch, { updated_at: now() })
+      return wait(c)
     },
     // the owner is the current user (the backend takes it from the session)
     create: (data: Omit<Campaign, "id">) => {
@@ -200,7 +209,17 @@ export const api = {
       if (q.network_id) rows = rows.filter((c) => db.offers.find((o) => o.id === c.offer_id)?.affiliate_network_id === q.network_id)
       if (q.buyer_id) rows = rows.filter((c) => db.campaigns.find((x) => x.id === c.campaign_id)?.owner_id === q.buyer_id)
       if (q.search) rows = rows.filter((c) => c.sub_id.includes(q.search!) || c.tid.includes(q.search!))
-      return wait({ rows: rows.slice(q.offset, q.offset + q.limit) as Conversion[], total: rows.length })
+      const withClick = (c: Conversion): ConversionLogRow => {
+        const k = db.clicks.find((x) => x.sub_id === c.sub_id)
+        return {
+          ...c,
+          click: k ? {
+            ts_id: k.ts_id, country: k.country, region: k.region, city: k.city, os: k.os, browser: k.browser, device_type: k.device_type, ip: k.ip,
+            external_id: k.external_id, sub_id_1: k.sub_id_1, sub_id_2: k.sub_id_2, sub_id_3: k.sub_id_3, sub_id_4: k.sub_id_4, sub_id_5: k.sub_id_5, sub_id_6: k.sub_id_6,
+          } : null,
+        }
+      }
+      return wait({ rows: (rows.slice(q.offset, q.offset + q.limit) as Conversion[]).map(withClick), total: rows.length })
     },
   },
   postbacks: {

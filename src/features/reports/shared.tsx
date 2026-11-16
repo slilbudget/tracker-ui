@@ -24,6 +24,12 @@ export function CampaignSelect({ value, onChange, className = "w-52" }: { value:
   )
 }
 
+// sub_id_1..6 aliases (Facebook campaign parameters): log columns
+export const SUB_ALIASES: Record<string, string> = {
+  sub_id_1: "Кабинет", sub_id_2: "Плейсмент", sub_id_3: "ID группы", sub_id_4: "Группа", sub_id_5: "Пиксель", sub_id_6: "ID объявления",
+}
+export const SUBS = ["sub_id_1", "sub_id_2", "sub_id_3", "sub_id_4", "sub_id_5", "sub_id_6"] as const
+
 export function useNames() {
   return useQuery({ queryKey: ["names"], queryFn: api.stats.names, staleTime: 60_000 })
 }
