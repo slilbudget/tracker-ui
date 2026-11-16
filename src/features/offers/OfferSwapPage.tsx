@@ -73,9 +73,10 @@ export default function OfferSwapPage() {
       && (!fApproach.length || fApproach.includes(c?.approach || "—"))
       && (!fBuyer.length || fBuyer.includes(String(c?.owner_id)))
       && (!fGroup.length || fGroup.includes(String(c?.group_id ?? "none")))
-      && (!fGeo.length || r.geo.some((g) => fGeo.includes(g)))
+      && (!fGeo.length || (r.geo.length ? r.geo.some((g) => fGeo.includes(g)) : fGeo.includes("—")))
   })
   const filtered = rows.length !== allRows.length
+  const clearFilters = () => { setQ(""); setFApproach([]); setFBuyer([]); setFGroup([]); setFGeo([]) }
   const anyFilter = !!q.trim() || fApproach.length + fBuyer.length + fGroup.length + fGeo.length > 0
   const uniq = (xs: string[]) => [...new Set(xs)].sort((a, b) => a.localeCompare(b, "ru"))
   const opts = {
@@ -84,7 +85,7 @@ export default function OfferSwapPage() {
       .map((v) => ({ value: v, label: users.data?.find((u) => String(u.id) === v)?.login ?? `#${v}` })),
     group: uniq(allRows.map((r) => String(campOf(r.campaign_id)?.group_id ?? "none")))
       .map((v) => ({ value: v, label: v === "none" ? "Без группы" : campGroups.data?.find((g) => String(g.id) === v)?.name ?? `#${v}` })),
-    geo: uniq(allRows.flatMap((r) => r.geo)).map((v) => ({ value: v, label: v })),
+    geo: [...uniq(allRows.flatMap((r) => r.geo)).map((v) => ({ value: v, label: v })), ...(allRows.some((r) => !r.geo.length) ? [{ value: "—", label: "Без гео" }] : [])],
   }
   const chosen = rows.filter((r) => !excluded.has(r.stream_id))
   const chosenCampaigns = new Set(chosen.map((r) => r.campaign_id)).size
@@ -139,7 +140,7 @@ export default function OfferSwapPage() {
   }
   const usedStreams = usage.data?.streams ?? 0
   const usedCampaigns = usage.data?.campaigns ?? 0
-  const geoFilterRows = rows.filter((r) => r.filters_before.length !== r.filters_after.length).length
+  const geoFilterRows = chosen.filter((r) => r.filters_before.length !== r.filters_after.length).length
 
   return (
     <Page>
@@ -148,7 +149,7 @@ export default function OfferSwapPage() {
         <div className="grid gap-x-8 px-3 py-2 lg:grid-cols-2">
           <div>
             <FormRow label="Что заменить" hint={fromOffer ? `${geoText(fromOffer)}${rate(fromOffer)}${capNote(fromOffer)}` : "Например, оффер, у которого отлилась капа"}>
-              {picker(from, setFrom, live, "Выберите оффер")}
+              {picker(from, (v) => { setFrom(v); clearFilters() }, live, "Выберите оффер")}
             </FormRow>
             <FormRow label="На что" hint={toOffer ? `${geoText(toOffer)}${rate(toOffer)}${capNote(toOffer)}` : to === REMOVE ? "Оффер уберётся, его доля разделится между остальными офферами потока" : undefined}>
               {picker(to, setTo, live.filter((o) => String(o.id) !== from), "Выберите новый оффер", true)}
@@ -186,7 +187,7 @@ export default function OfferSwapPage() {
               <Slicer label="Байер" options={opts.buyer} value={fBuyer} onChange={setFBuyer} />
               <Slicer label="Группа" options={opts.group} value={fGroup} onChange={setFGroup} />
               <Slicer label="Гео" options={opts.geo} value={fGeo} onChange={setFGeo} />
-              {anyFilter && <Button variant="ghost" onClick={() => { setQ(""); setFApproach([]); setFBuyer([]); setFGroup([]); setFGeo([]) }}>Сбросить</Button>}
+              {anyFilter && <Button variant="ghost" onClick={clearFilters}>Сбросить</Button>}
               {filtered && <span className="text-sm text-muted-foreground">Замена коснётся только показанных потоков</span>}
             </div>
           )}

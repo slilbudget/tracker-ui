@@ -62,17 +62,24 @@ export default function CampaignsPage() {
 
   const bulk = useMutation({
     mutationFn: async ({ ids, op }: { ids: number[]; op: "enable" | "disable" | "delete" | "clone" }) => {
+      // campaigns seen through a «read» grant are skipped (cloning only reads the source, so it is allowed)
+      let skipped = 0
       for (const id of ids) {
+        if (op !== "clone" && (await api.campaigns.access(id)).level !== "edit") { skipped++; continue }
         if (op === "delete") await api.campaigns.remove(id)
         else if (op === "clone") await api.campaigns.clone(id)
         else await api.campaigns.update(id, { state: op === "enable" ? "active" : "disabled" })
       }
+      return skipped
     },
-    onSuccess: (_, v) => {
+    onSuccess: (skipped, v) => {
       qc.invalidateQueries({ queryKey: ["campaigns"] })
       qc.invalidateQueries({ queryKey: ["streams"] })
-      toast.success(v.op === "clone" ? "Кампании клонированы" : v.op === "delete" ? "Перемещено в архив" : "Готово")
+      const done = v.op === "clone" ? "Кампании клонированы" : v.op === "delete" ? "Перемещено в архив" : "Готово"
+      if (skipped) toast.warning(`${done}. Пропущено ${skipped}: только просмотр`)
+      else toast.success(done)
     },
+    onError: (e: Error) => { qc.invalidateQueries({ queryKey: ["campaigns"] }); toast.error(e.message) },
   })
   const create = useMutation({
     mutationFn: async ({ template_id, ...c }: Pick<Campaign, "name" | "domain_id" | "group_id" | "traffic_source_id" | "template_id" | "approach">) => {

@@ -29,6 +29,8 @@ import { CampaignSelect, Clip, ConversionStatusCell, EntityName, STATUS_SHORT, S
 
 const DEFAULT_COLS = ["campaign", "buyer", "landing", "offer", "network", "status", "reject_reason", "revenue"]
 
+const FIXED = ["postback", "sub_id"]
+
 export default function ConversionsLogPage() {
   const { timezone } = useApp()
   const [range, setRange] = usePeriod()
@@ -127,9 +129,9 @@ export default function ConversionsLogPage() {
     add("Гео и устройство", "ip", "IP", (c) => c.click?.ip ?? "—", { cell: ({ row }) => mono(row.original.click?.ip ?? "—") })
     return defs
   }, [names.data, timezone, money, pre, seeNetworks])
-  const choice = useColumnChoice("conversions", catalog, DEFAULT_COLS)
+  const choice = useColumnChoice("conversions", catalog, DEFAULT_COLS, FIXED)
   const columns = useMemo(
-    () => ["postback", "sub_id", ...choice.visible].map((id) => catalog.find((d) => d.id === id)?.col).filter((c): c is ColumnDef<ConversionLogRow, unknown> => !!c),
+    () => [...FIXED, ...choice.visible].map((id) => catalog.find((d) => d.id === id)?.col).filter((c): c is ColumnDef<ConversionLogRow, unknown> => !!c),
     [catalog, choice.visible],
   )
 
@@ -208,7 +210,7 @@ export default function ConversionsLogPage() {
         }
         right={
           <>
-            <ColumnsButton all={catalog} value={choice.visible} defaults={DEFAULT_COLS} fixed={["postback", "sub_id"]} onChange={choice.setVisible} />
+            <ColumnsButton all={catalog} value={choice.visible} defaults={DEFAULT_COLS} fixed={FIXED} onChange={choice.setVisible} />
             <PeriodSelect value={range} onChange={setRange} />
           </>
         }

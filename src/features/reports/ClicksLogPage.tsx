@@ -23,6 +23,8 @@ import { CampaignSelect, Clip, EntityName, decodeFilters, encodeFilters, reportL
 
 const DEFAULT_COLS = ["campaign", "stream", "landing", "offer", "country", "is_bot", "is_unique", "cost"]
 
+const FIXED = ["datetime", "sub_id"]
+
 export default function ClicksLogPage() {
   const { timezone } = useApp()
   const [range, setRange] = usePeriod()
@@ -99,9 +101,9 @@ export default function ClicksLogPage() {
     if (showCost) add("Деньги", "cost", "Расход", (c) => c.cost, { meta: { align: "right" }, cell: ({ row }) => fmtMoney(row.original.cost) })
     return defs
   }, [names.data, timezone, showCost, pre])
-  const choice = useColumnChoice("clicks", catalog, DEFAULT_COLS)
+  const choice = useColumnChoice("clicks", catalog, DEFAULT_COLS, FIXED)
   const columns = useMemo(
-    () => ["datetime", "sub_id", ...choice.visible].map((id) => catalog.find((d) => d.id === id)?.col).filter((c): c is ColumnDef<Click, unknown> => !!c),
+    () => [...FIXED, ...choice.visible].map((id) => catalog.find((d) => d.id === id)?.col).filter((c): c is ColumnDef<Click, unknown> => !!c),
     [catalog, choice.visible],
   )
 
@@ -144,7 +146,7 @@ export default function ClicksLogPage() {
         }
         right={
           <>
-            <ColumnsButton all={catalog} value={choice.visible} defaults={DEFAULT_COLS} fixed={["datetime", "sub_id"]} onChange={choice.setVisible} />
+            <ColumnsButton all={catalog} value={choice.visible} defaults={DEFAULT_COLS} fixed={FIXED} onChange={choice.setVisible} />
             <PeriodSelect value={range} onChange={setRange} />
           </>
         }

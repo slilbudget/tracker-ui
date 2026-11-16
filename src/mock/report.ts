@@ -171,7 +171,9 @@ const excluded = (campaignId: number) => !!camp.get(campaignId)?.stats_excluded
 
 export function buildReport(req: ReportRequest): ReportResponse {
   const tz = req.range.timezone
-  const clicks = filterClicks(req).filter((c) => req.include_excluded || !excluded(c.campaign_id))
+  // a filter on the campaign itself means «show this one»: links from the campaign page, problems, the click sheet
+  const named = req.filters.some((f) => f.name === "campaign" || f.name === "campaign_id")
+  const clicks = filterClicks(req).filter((c) => req.include_excluded || named || !excluded(c.campaign_id))
   const groups = new Map<string, { dims: string[]; acc: Acc }>()
   const total = empty()
   for (const c of clicks) {

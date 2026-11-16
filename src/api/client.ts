@@ -7,7 +7,7 @@ import type {
 } from "./types"
 import * as db from "@/mock/seed"
 import { buildReport, filterClicks, statsBy } from "@/mock/report"
-import { campaignAccess, canSeeCampaign, viewerGroupIds, viewerUser } from "@/mock/scope"
+import { campaignAccess, canEditCampaign, canEditStreams, canSeeCampaign, grantedGroupIds, viewerGroupIds, viewerUser } from "@/mock/scope"
 import { inRange, resolveRange } from "@/lib/dates"
 import { offersApi } from "./client-offers"
 import { fbApi, problemsApi } from "./client-problems"
@@ -69,9 +69,27 @@ function crud<T extends { id: ID }>(table: T[], opts: { touch?: boolean } = {}) 
 // the reports and the click path show, so the log shows it too.
 const withOffer = (c: Click): Click => (c.offer_id != null ? c : { ...c, offer_id: db.streams.find((s) => s.id === c.stream_id)?.offers[0]?.offer_id ?? null })
 
+// sub_id → click, rebuilt when clicks are added (the conversions log joins every row to its click)
+let clickIndex: { n: number; map: Map<string, Click> } = { n: -1, map: new Map() }
+const clickBySubId = (subId: string) => {
+  if (clickIndex.n !== db.clicks.length) clickIndex = { n: db.clicks.length, map: new Map(db.clicks.map((c) => [c.sub_id, c])) }
+  return clickIndex.map.get(subId)
+}
+
+// write guards: undefined = allowed, otherwise the rejected promise to return
+const campaignCrud = crud<Campaign>(db.campaigns, { touch: true })
+const streamCrud = crud<Stream>(db.streams)
+const editable = (id: ID) =>
+  !canSeeCampaign(id) || !db.campaigns.some((c) => c.id === id) ? Promise.reject(new ApiError("Кампания не найдена"))
+  : !canEditCampaign(id) ? Promise.reject(new ApiError("Только просмотр: у вас нет права менять эту кампанию"))
+  : undefined
+const campaignOfStream = (id: ID) => db.streams.find((s) => s.id === id)?.campaign_id ?? -1
+const streamsEditable = (campaignId: ID) =>
+  canEditStreams(campaignId) ? undefined : Promise.reject(new ApiError("Только просмотр: у вас нет права менять потоки этой кампании"))
+
 export const api = {
   campaigns: {
-    ...crud<Campaign>(db.campaigns, { touch: true }),
+    ...campaignCrud,
     list: () => wait(db.campaigns.filter((c) => c.state !== "deleted" && canSeeCampaign(c.id))),
     // archived or outside the viewer's scope = not found
     get: (id: ID) => {
@@ -79,14 +97,13 @@ export const api = {
       return c && c.state !== "deleted" && canSeeCampaign(id) ? wait(c) : Promise.reject(new ApiError("Кампания не найдена"))
     },
     // what the viewer may do with this campaign: by the role, or by a single-object grant (Users → «Отдельные доступы»)
-    access: (id: ID) => wait({ level: campaignAccess(id) }),
+    access: (id: ID) => wait(campaignAccess(id)),
     update: (id: ID, patch: Partial<Campaign>) => {
       const c = db.campaigns.find((x) => x.id === id)
-      if (!c || campaignAccess(id) === "none") return Promise.reject(new ApiError("Кампания не найдена"))
-      if (campaignAccess(id) !== "edit") return Promise.reject(new ApiError("Только просмотр: у вас нет права менять эту кампанию"))
-      Object.assign(c, patch, { updated_at: now() })
-      return wait(c)
+      return editable(id) ?? (Object.assign(c!, patch, { updated_at: now() }), wait(c!))
     },
+    remove: (id: ID) => editable(id) ?? campaignCrud.remove(id),
+    restore: (id: ID) => editable(id) ?? campaignCrud.restore(id),
     // the owner is the current user (the backend takes it from the session)
     create: (data: Omit<Campaign, "id">) => {
       const c: Campaign = { ...data, id: nextId(db.campaigns), owner_id: viewerUser().id, created_at: now(), updated_at: now() }
@@ -122,13 +139,20 @@ export const api = {
       return wait(copy)
     },
   },
+  // every stream write checks the campaign: by the role, or an «edit» grant
   streams: {
-    ...crud<Stream>(db.streams),
+    ...streamCrud,
+    create: (data: Omit<Stream, "id">) => streamsEditable(data.campaign_id) ?? streamCrud.create(data),
+    update: (id: ID, patch: Partial<Stream>) => streamsEditable(campaignOfStream(id)) ?? streamCrud.update(id, patch),
+    remove: (id: ID) => streamsEditable(campaignOfStream(id)) ?? streamCrud.remove(id),
+    restore: (id: ID) => streamsEditable(campaignOfStream(id)) ?? streamCrud.restore(id),
     byCampaign: (campaignId: ID) =>
       wait(canSeeCampaign(campaignId) ? db.streams.filter((s) => s.campaign_id === campaignId && s.state !== "deleted").sort((a, b) => a.position - b.position) : []),
     stats: (range: DateRange) => wait(Object.fromEntries(statsBy("stream_id", range))),
     // Bulk weight update: the split editor saves all weights in one call.
     setWeights: (weights: { id: ID; weight: number }[]) => {
+      const denied = weights.map((w) => streamsEditable(campaignOfStream(w.id))).find(Boolean)
+      if (denied) return denied
       for (const w of weights) {
         const s = db.streams.find((x) => x.id === w.id)
         if (s) Object.assign(s, { weight: w.weight, updated_at: now() })
@@ -136,6 +160,8 @@ export const api = {
       return wait({ ok: true })
     },
     reorder: (campaignId: ID, ids: ID[]) => {
+      const denied = streamsEditable(campaignId)
+      if (denied) return denied
       ids.forEach((id, i) => {
         const s = db.streams.find((x) => x.id === id && x.campaign_id === campaignId)
         if (s) s.position = i + 1
@@ -173,7 +199,9 @@ export const api = {
   },
   groups: {
     // campaign groups are access scopes: a scoped viewer gets only their own
-    list: (type: GroupType) => wait(db.groups.filter((g) => g.type === type && (type !== "campaigns" || viewerGroupIds() == null || viewerGroupIds()!.includes(g.id)))),
+    list: (type: GroupType) => wait(db.groups.filter((g) => g.type === type &&
+      (type !== "campaigns" || viewerGroupIds() == null || viewerGroupIds()!.includes(g.id) || grantedGroupIds().includes(g.id) ||
+        db.campaigns.some((c) => c.group_id === g.id && canSeeCampaign(c.id))))),
     create: (g: Omit<Group, "id">) => {
       const x = { ...g, id: nextId(db.groups) }
       db.groups.push(x)
@@ -210,7 +238,7 @@ export const api = {
       if (q.buyer_id) rows = rows.filter((c) => db.campaigns.find((x) => x.id === c.campaign_id)?.owner_id === q.buyer_id)
       if (q.search) rows = rows.filter((c) => c.sub_id.includes(q.search!) || c.tid.includes(q.search!))
       const withClick = (c: Conversion): ConversionLogRow => {
-        const k = db.clicks.find((x) => x.sub_id === c.sub_id)
+        const k = clickBySubId(c.sub_id)
         return {
           ...c,
           click: k ? {

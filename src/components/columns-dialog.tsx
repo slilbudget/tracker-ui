@@ -1,6 +1,6 @@
 // Column settings of a log, like Keitaro's: every field the log has, by group, with search; the chosen ones in their
 // order (drag or arrows). Remembered per user (here: localStorage; the API keeps it in user preferences).
-import { useEffect, useState, type DragEvent } from "react"
+import { useMemo, useState, type DragEvent } from "react"
 import { ArrowDownIcon, ArrowUpIcon, Columns3Icon, GripVerticalIcon, XIcon } from "lucide-react"
 import { Icon } from "@/components/icon"
 import { Button } from "@/components/ui/button"
@@ -20,14 +20,20 @@ const read = (k: string): string[] | null => {
 }
 
 // visible column ids in their order; unknown ids (a field removed later) are dropped
-export function useColumnChoice(storageKey: string, all: ColumnChoice[], defaults: string[]) {
+// Saved only when the user applies a choice: until then later changes of the defaults reach them.
+export function useColumnChoice(storageKey: string, all: ColumnChoice[], defaults: string[], fixed: string[] = []) {
   const key = `trk.logcols.${storageKey}`
-  const [ids, setIds] = useState<string[]>(() => read(key) ?? defaults)
-  useEffect(() => {
-    try { localStorage.setItem(key, JSON.stringify(ids)) } catch { /* private mode */ }
-  }, [key, ids])
-  const known = new Set(all.map((c) => c.id))
-  return { visible: ids.filter((id) => known.has(id)), setVisible: setIds }
+  const [saved, setSaved] = useState<string[] | null>(() => read(key))
+  const ids = saved ?? defaults
+  const visible = useMemo(() => {
+    const known = new Set(all.map((c) => c.id))
+    return ids.filter((id) => known.has(id) && !fixed.includes(id))
+  }, [ids, all, fixed])
+  const setVisible = (v: string[]) => {
+    setSaved(v)
+    try { localStorage.setItem(key, JSON.stringify(v)) } catch { /* private mode */ }
+  }
+  return { visible, setVisible }
 }
 
 export function ColumnsButton({ all, value, defaults, onChange, fixed = [] }: {
@@ -133,7 +139,7 @@ function ColumnsDialog({ all, value, defaults, fixed, onClose, onApply }: {
           </div>
         </div>
         <DialogFooter className="gap-2 sm:justify-between">
-          <Button variant="ghost" onClick={() => setDraft(defaults)}>По умолчанию</Button>
+          <Button variant="ghost" onClick={() => setDraft(defaults.filter((id) => all.some((c) => c.id === id) && !fixed.includes(id)))}>По умолчанию</Button>
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose}>Отмена</Button>
             <Button onClick={() => onApply(draft)}>Применить</Button>

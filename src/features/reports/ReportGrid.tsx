@@ -2,9 +2,9 @@
 // Only the report uses AG Grid (owner 15/11); the other sections keep DataTable.
 // Grouping rows are not AG Grid's row grouping (that one is Enterprise): every level is its own request to the API
 // (ratios like CR / ROI are computed by the server per group), and the rows are flattened into one list here.
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from "react"
-import { Link } from "react-router"
-import { keepPreviousData, useQueries } from "@tanstack/react-query"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { Link, useNavigate } from "react-router"
+import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query"
 import { AgGridReact, type CustomCellRendererProps } from "ag-grid-react"
 import {
   CellStyleModule, ClientSideRowModelModule, ColumnApiModule, ModuleRegistry, PinnedRowModule, RowStyleModule, TooltipModule,
@@ -66,6 +66,9 @@ const theme = themeQuartz.withParams({
   iconSize: 12,
 })
 
+// a constant: a new object on every render would make AG Grid rebuild the columns (and drop a resize)
+const DEFAULT_COL: ColDef<GridRow> = { resizable: true, sortingOrder: ["desc", "asc", null] }
+
 type Kind = "row" | "loading" | "empty" | "more"
 interface GridRow {
   id: string
@@ -108,71 +111,70 @@ export function ReportGrid({
   const [custom, setCustom] = useState(() => loadState(dims) != null)
   const gridApi = useRef<GridApi<GridRow> | null>(null)
   const sm = useSm()
+  const nav = useNavigate()
   const prevRange = useMemo(() => previousRange(range), [range])
 
-  // one request per open level: [] = the top level
-  const levels = useMemo(() => [{ path: "", parent: [] as ReportFilter[] }, ...[...expanded].map(([path, parent]) => ({ path, parent }))], [expanded])
   const sortReq = (dim: string) => sort && (sort.key === "_dim" || measures.includes(sort.key))
     ? [{ name: sort.key === "_dim" ? dim : sort.key, order: sort.desc ? ("DESC" as const) : ("ASC" as const) }]
     : []
-  const cur = useQueries({
-    queries: levels.map(({ path, parent }) => {
-      const dim = dims[parent.length]
-      const f = [...filters, ...parent]
-      const s = sortReq(dim)
-      const limit = parent.length ? CHILD_LIMIT : undefined
-      return {
-        queryKey: ["report", range, dim, measures, f, s, limit, withExcluded],
-        queryFn: () => api.reports.build({ range, dimensions: [dim], measures, filters: f, sort: s, limit, include_excluded: withExcluded }),
-        placeholderData: path === "" ? keepPreviousData : undefined,
-      }
-    }),
-  })
-  const prev = useQueries({
-    queries: levels.map(({ parent }) => {
-      const dim = dims[parent.length]
-      const f = [...filters, ...parent]
-      return {
-        queryKey: ["report", "prev", prevRange, dim, measures, f, withExcluded],
-        queryFn: () => api.reports.build({ range: prevRange, dimensions: [dim], measures, filters: f, sort: [], include_excluded: withExcluded }),
-        // a time level has no «same row» in the previous period
-        enabled: compare && dimensionDef(dim)?.group !== "time",
-      }
-    }),
-  })
-
-  const byPath = new Map<string, { cur?: ReportResponse; loading: boolean; prev?: Map<string, ReportRow> }>()
-  levels.forEach((l, i) => {
-    const dim = dims[l.parent.length]
-    const p = compare ? prev[i]?.data : undefined
-    byPath.set(l.path, { cur: cur[i]?.data, loading: !!cur[i]?.isLoading, prev: p ? new Map(p.rows.map((r) => [String(r[dim]), r])) : undefined })
-  })
-  const top = byPath.get("")!
-
-  // flatten the open tree into grid rows
-  const rows: GridRow[] = []
-  const walk = (path: string, parent: ReportFilter[]) => {
-    const level = parent.length
-    const dim = dims[level]
-    const lv = byPath.get(path)
-    if (!lv?.cur) {
-      rows.push({ id: `${path}${SEP}~loading`, kind: "loading", level, value: "Загрузка…" })
-      return
-    }
-    if (!lv.cur.rows.length && level > 0) rows.push({ id: `${path}${SEP}~empty`, kind: "empty", level, value: "Нет данных" })
-    for (const r of lv.cur.rows) {
-      const value = String(r[dim] ?? "—")
-      const own = path ? `${path}${SEP}${value}` : value
-      const canExpand = level < dims.length - 1
-      const open = canExpand && expanded.has(own)
-      rows.push({ id: own, kind: "row", level, value, canExpand, open, data: r, prev: lv.prev?.get(value), parent })
-      if (open) walk(own, [...parent, { name: dim, operator: "EQUALS", expression: value }])
-    }
-    if (level > 0 && lv.cur.total > lv.cur.rows.length) {
-      rows.push({ id: `${path}${SEP}~more`, kind: "more", level, value: "", shown: lv.cur.rows.length, total: lv.cur.total, parent })
+  const curQuery = (parent: ReportFilter[]) => {
+    const dim = dims[parent.length]
+    const f = [...filters, ...parent]
+    const s = sortReq(dim)
+    const limit = parent.length ? CHILD_LIMIT : undefined
+    return {
+      queryKey: ["report", range, dim, measures, f, s, limit, withExcluded],
+      queryFn: () => api.reports.build({ range, dimensions: [dim], measures, filters: f, sort: s, limit, include_excluded: withExcluded }),
     }
   }
-  if (top.cur) walk("", [])
+  const prevQuery = (parent: ReportFilter[]) => {
+    const dim = dims[parent.length]
+    const f = [...filters, ...parent]
+    return {
+      queryKey: ["report", "prev", prevRange, dim, measures, f, withExcluded],
+      queryFn: () => api.reports.build({ range: prevRange, dimensions: [dim], measures, filters: f, sort: [], include_excluded: withExcluded }),
+      // a time level (or a row under a day / hour) has no «same row» in the previous period
+      enabled: compare && dimensionDef(dim)?.group !== "time" && !parent.some((x) => dimensionDef(x.name)?.group === "time"),
+    }
+  }
+  // the top level keeps its rows while a new sort / filter loads, so the grid is not rebuilt
+  const top = useQuery({ ...curQuery([]), placeholderData: keepPreviousData })
+  const topPrev = useQuery(prevQuery([]))
+  // one request per open row (its children); `combine` keeps the same array while nothing changed
+  const opened = useMemo(() => [...expanded], [expanded])
+  const kids = useQueries({ queries: opened.map(([, parent]) => curQuery(parent)), combine: (rs) => rs.map((r) => r.data) })
+  const kidsPrev = useQueries({ queries: opened.map(([, parent]) => prevQuery(parent)), combine: (rs) => rs.map((r) => r.data) })
+
+  // flatten the open tree into grid rows
+  const rows = useMemo(() => {
+    const byPath = new Map<string, { cur?: ReportResponse; prev?: ReportResponse }>([["", { cur: top.data, prev: topPrev.data }]])
+    opened.forEach(([path], i) => byPath.set(path, { cur: kids[i], prev: kidsPrev[i] }))
+    const out: GridRow[] = []
+    const walk = (path: string, parent: ReportFilter[]) => {
+      const level = parent.length
+      const dim = dims[level]
+      const lv = byPath.get(path)
+      if (!lv?.cur) {
+        out.push({ id: `${path}${SEP}~loading`, kind: "loading", level, value: "Загрузка…" })
+        return
+      }
+      const prevBy = compare && lv.prev ? new Map(lv.prev.rows.map((r) => [String(r[dim]), r])) : undefined
+      if (!lv.cur.rows.length && level > 0) out.push({ id: `${path}${SEP}~empty`, kind: "empty", level, value: "Нет данных" })
+      for (const r of lv.cur.rows) {
+        const value = String(r[dim] ?? "—")
+        const own = path ? `${path}${SEP}${value}` : value
+        const canExpand = level < dims.length - 1
+        const open = canExpand && expanded.has(own)
+        out.push({ id: own, kind: "row", level, value, canExpand, open, data: r, prev: prevBy?.get(value), parent })
+        if (open) walk(own, [...parent, { name: dim, operator: "EQUALS", expression: value }])
+      }
+      if (level > 0 && lv.cur.total > lv.cur.rows.length) {
+        out.push({ id: `${path}${SEP}~more`, kind: "more", level, value: "", shown: lv.cur.rows.length, total: lv.cur.total, parent })
+      }
+    }
+    if (top.data) walk("", [])
+    return out
+  }, [top.data, topPrev.data, opened, kids, kidsPrev, expanded, dims, compare])
 
   const toggle = useCallback((row: GridRow) => {
     if (row.kind !== "row" || !row.canExpand) return
@@ -193,13 +195,15 @@ export function ReportGrid({
     {
       colId: "_dim",
       headerName: dimLabel,
-      pinned: sm ? "left" : null,
+      // initial*: a width / place the user set is not reset when the definitions change
+      initialPinned: sm ? "left" : false,
       lockPinned: true,
-      width: sm ? 300 : 180,
+      initialWidth: sm ? 300 : 180,
       minWidth: 160,
       sortable: true,
       comparator: () => 0, // rows come sorted by the server; the grid keeps their order
-      valueGetter: (p) => p.data?.value,
+      // AG Grid redraws a cell only when its value changes: the value carries the open state too
+      valueGetter: (p) => (p.data ? `${p.data.kind}|${p.data.value}|${p.data.open ? 1 : 0}` : null),
       cellRenderer: DimCell,
       cellRendererParams: { dims, filters, range, toggle },
     },
@@ -209,18 +213,22 @@ export function ReportGrid({
       headerTooltip: metricDef(k)?.name,
       type: "rightAligned",
       // the metrics share the free width; with many of them the grid scrolls sideways
-      flex: 1,
+      initialFlex: 1,
       minWidth: 96,
       sortable: true,
       comparator: () => 0,
-      valueGetter: (p) => p.data?.data?.[k] ?? null,
+      // value + previous-period value: the delta appears when the comparison loads later
+      valueGetter: (p) => (p.data ? `${p.data.data?.[k] ?? ""}|${p.data.prev?.[k] ?? ""}` : null),
       cellRenderer: MetricCell,
       cellRendererParams: { k, compare },
     })),
   ], [dimLabel, dims, filters, range, toggle, measures, compare, sm])
 
-  const summary = top.cur?.summary
-  const prevSummary = compare ? prev[0]?.data?.summary : undefined
+  // phones: no pinned column (it would take the whole screen)
+  useEffect(() => { gridApi.current?.applyColumnState({ state: [{ colId: "_dim", pinned: sm ? "left" : null }] }) }, [sm])
+
+  const summary = top.data?.summary
+  const prevSummary = compare ? topPrev.data?.summary : undefined
   const pinnedBottom = useMemo<GridRow[]>(
     () => (summary && rows.length ? [{ id: "~total", kind: "row", level: 0, value: "Итого", data: summary, prev: prevSummary }] : []),
     [summary, prevSummary, rows.length],
@@ -244,14 +252,14 @@ export function ReportGrid({
     setSort(s ? { key: s.colId, desc: s.sort === "desc" } : null)
   }
 
-  if (top.loading && !top.cur) {
+  if (!top.data) {
     return (
       <div className="flex flex-col gap-1 rounded-md border p-2">
         {Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="h-6 w-full" />)}
       </div>
     )
   }
-  if (!top.cur?.rows.length) {
+  if (!top.data.rows.length) {
     return (
       <div className="rounded-md border px-3 py-8 text-center text-sm text-muted-foreground">
         Нет данных за период и по фильтрам.
@@ -277,7 +285,8 @@ export function ReportGrid({
           rowData={rows}
           pinnedBottomRowData={pinnedBottom}
           columnDefs={columnDefs}
-          defaultColDef={{ resizable: true, suppressMovable: false, sortingOrder: ["desc", "asc", null] }}
+          defaultColDef={DEFAULT_COL}
+          maintainColumnOrder
           getRowId={(p) => p.data.id}
           rowHeight={rowH}
           onGridReady={(e) => {
@@ -291,7 +300,10 @@ export function ReportGrid({
           onRowClicked={(e) => { if (e.data && !e.rowPinned) toggle(e.data) }}
           onCellKeyDown={(e) => {
             const k = (e.event as KeyboardEvent | null)?.key
-            if (e.data && (k === "Enter" || k === " ")) toggle(e.data)
+            if (!e.data || (k !== "Enter" && k !== " ")) return
+            // «Показано 50 из N»: Enter opens the full report of that level
+            if (e.data.kind === "more") nav(reportLink({ g: dims.slice(e.data.level), filters: [...filters, ...(e.data.parent ?? [])], range }))
+            else toggle(e.data)
           }}
           getRowClass={(p: RowClassParams<GridRow>) => (p.data?.canExpand ? "cursor-pointer" : undefined)}
           suppressCellFocus={false}
@@ -302,9 +314,9 @@ export function ReportGrid({
         />
       </div>
       <div className="min-h-8 text-sm text-muted-foreground">
-        Строк: {top.cur.total}
+        Строк: {top.data.total}
         {custom && <> · <button type="button" className="text-link" onClick={resetState}>Сбросить ширину и порядок колонок</button></>}
-        {compare && prev[0]?.data && <> · сравнение с {fmtDayKey(prevRange.from ?? "")} — {fmtDayKey(prevRange.to ?? "")}; п.п. — процентные пункты</>}
+        {compare && topPrev.data && <> · сравнение с {fmtDayKey(prevRange.from ?? "")} — {fmtDayKey(prevRange.to ?? "")}; п.п. — процентные пункты</>}
         {dims.length > 1 && <> · нажмите строку, чтобы раскрыть уровень «{dimensionDef(dims[1])?.name}»</>}
       </div>
     </div>
@@ -315,6 +327,13 @@ export function ReportGrid({
 
 function DimCell(p: CustomCellRendererProps<GridRow> & { dims: string[]; filters: ReportFilter[]; range: DateRange; toggle: (r: GridRow) => void }) {
   const row = p.data
+  // screen readers: an expandable row says whether it is open (AG Grid has no option for this outside row grouping)
+  const rowEl = p.eGridCell?.closest("[role=row]")
+  useEffect(() => {
+    if (!rowEl) return
+    if (row?.kind === "row" && row.canExpand) rowEl.setAttribute("aria-expanded", String(!!row.open))
+    else rowEl.removeAttribute("aria-expanded")
+  }, [rowEl, row])
   if (!row) return null
   if (p.node.rowPinned) return <span>Итого</span>
   const pad = { paddingLeft: row.level * 16 + (row.kind === "row" ? 0 : 16) }

@@ -4,7 +4,7 @@ import type {
   CapProgress, ID, OfferGroup, OfferGroupCap, OfferSwapRequest, OfferSwapRow, Stream, StreamFilter, StreamOffer, TemplateDiff,
 } from "./types"
 import * as db from "@/mock/seed"
-import { canSeeCampaign } from "@/mock/scope"
+import { canEditStreams } from "@/mock/scope"
 import { statsBy } from "@/mock/report"
 import { audit, nextId, now, wait } from "./mock-util"
 
@@ -58,7 +58,7 @@ function swapRows(q: OfferSwapRequest): OfferSwapRow[] {
   const to = q.to_offer_id != null ? db.offers.find((o) => o.id === q.to_offer_id) : null
   // the same offer, or a target that does not exist / is archived: nothing to replace
   if (!from || q.to_offer_id === from.id || (q.to_offer_id != null && (!to || to.state === "deleted"))) return []
-  const live = new Set(db.campaigns.filter((c) => c.state !== "deleted" && canSeeCampaign(c.id)).map((c) => c.id))
+  const live = new Set(db.campaigns.filter((c) => c.state !== "deleted" && canEditStreams(c.id)).map((c) => c.id))
   return db.streams
     .filter((s) => s.state !== "deleted" && live.has(s.campaign_id) && s.offers.some((x) => x.offer_id === from.id))
     .filter((s) => !q.stream_ids || q.stream_ids.includes(s.id))
@@ -171,7 +171,7 @@ export const offersApi = {
     // What «Применить к кампаниям» would change in every linked campaign (streams matched by name, weights ignored).
     diff: (templateId: ID): Promise<TemplateDiff[]> => {
       const tpl = liveStreams(templateId)
-      const linked = db.campaigns.filter((c) => c.template_id === templateId && c.state !== "deleted" && canSeeCampaign(c.id))
+      const linked = db.campaigns.filter((c) => c.template_id === templateId && c.state !== "deleted" && canEditStreams(c.id))
       return wait(linked.map((c) => {
         const own = liveStreams(c.id)
         const byName = new Map(own.map((s) => [s.name, s]))
@@ -188,7 +188,8 @@ export const offersApi = {
     apply: (templateId: ID, campaignIds: ID[], keepWeights: boolean) => {
       const tpl = liveStreams(templateId)
       const tplName = db.campaigns.find((c) => c.id === templateId)?.name ?? `#${templateId}`
-      for (const cid of campaignIds) {
+      // only campaigns whose streams the viewer may change
+      for (const cid of campaignIds.filter(canEditStreams)) {
         const own = liveStreams(cid)
         const weight = new Map(own.map((s) => [s.name, s.weight]))
         for (const s of own) s.state = "deleted"

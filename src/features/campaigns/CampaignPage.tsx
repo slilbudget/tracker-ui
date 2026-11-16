@@ -10,7 +10,7 @@ import { api } from "@/api/client"
 import { cn } from "@/lib/utils"
 import { CONVERSION_STATUSES } from "@/api/meta"
 import { ApproachSelect } from "./ApproachSelect"
-import { useAccess, usePeriod, useUrlParam } from "@/app/state"
+import { usePeriod, useUrlParam } from "@/app/state"
 import { Page } from "@/components/page"
 import { ConfirmDialog, CopyButton, FormRow, StateDot } from "@/components/common"
 import { Icon } from "@/components/icon"
@@ -44,13 +44,11 @@ function CampaignPage({ id }: { id: string | undefined }) {
   const cid = Number(id)
   const qc = useQueryClient()
   const nav = useNavigate()
-  const roleAccess = useAccess("campaigns")
-  const roleStreams = useAccess("streams")
-  // the server decides per campaign: the role, or a single-object grant (read / edit) on it or its group
+  // the server decides per campaign: the role, or a single-object grant (read / edit) on it or its group;
+  // while it loads, the page is read-only
   const myAccess = useQuery({ queryKey: ["campaigns", cid, "access"], queryFn: () => api.campaigns.access(cid) })
   const canEdit = myAccess.data?.level === "edit"
-  // streams follow the role; when the edit right comes only from a grant, the grant covers the streams too
-  const streamsAccess = { canEdit: canEdit && (roleStreams.canEdit || !roleAccess.canEdit) }
+  const streamsAccess = { canEdit: myAccess.data?.streams === "edit" }
   const [range, setRange] = usePeriod()
   const [tab, setTab] = useUrlParam("tab", "streams")
   const wide = useWide()

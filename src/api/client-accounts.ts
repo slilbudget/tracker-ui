@@ -2,15 +2,16 @@
 // Same contract style as client.ts: each function is one backend endpoint.
 import type { AdFeePeriod, AdProvider, FbAdAccount, ID } from "./types"
 import * as db from "@/mock/seed"
-import { canSeeCampaign, viewerAccess, viewerUser } from "@/mock/scope"
+import { inRoleScope, viewerAccess, viewerUser } from "@/mock/scope"
 import { audit, nextId, wait } from "./mock-util"
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10)
 const mask = (t: string) => (t.length > 10 ? `${t.slice(0, 4)}…${t.slice(-4)}` : t ? "…" : "")
 
-// A viewer sees accounts of buyers whose campaigns they see; free accounts only with full scope.
+// A viewer sees accounts of buyers whose campaigns their role covers; free accounts only with full scope.
+// A grant on a single campaign does not open the buyer's accounts.
 const visible = (a: FbAdAccount) =>
-  canSeeCampaign(null) ? true : a.buyer_id != null && db.campaigns.some((c) => c.owner_id === a.buyer_id && canSeeCampaign(c.id))
+  inRoleScope(null) || (a.buyer_id != null && db.campaigns.some((c) => c.owner_id === a.buyer_id && inRoleScope(c.id)))
 
 const log = (summary: string) => audit("ad_accounts", summary)
 

@@ -3,7 +3,7 @@
 // Mock: the checks run over the seed on every call; mute / resolve marks are kept in memory.
 import type { FbDayStat, ID, Problem, ProblemCheck, ProblemKind } from "./types"
 import * as db from "@/mock/seed"
-import { canSeeCampaign } from "@/mock/scope"
+import { canSeeCampaign, inRoleScope } from "@/mock/scope"
 import { capOf } from "./client-offers"
 import { approachIndex, currentAdNaming } from "./client-directory"
 import { wait } from "./mock-util"
@@ -245,7 +245,7 @@ function accounts(kind: "spend_diff" | "account_error"): Problem[] {
   const out: Problem[] = []
   for (const a of db.fbAccounts) {
     if (!a.active) continue
-    const mine = a.buyer_id == null ? canSeeCampaign(null) : db.campaigns.some((c) => c.owner_id === a.buyer_id && canSeeCampaign(c.id))
+    const mine = a.buyer_id == null ? inRoleScope(null) : db.campaigns.some((c) => c.owner_id === a.buyer_id && inRoleScope(c.id))
     if (!mine) continue
     const where = [{ label: `Кабинет ${a.name} · ${a.id}`, href: `#/ad-accounts?edit=${a.id}` }]
     const diff = a.spend_diff + a.spend_offset
@@ -306,7 +306,7 @@ export const problemsApi = {
 
 // FB entities for the click sheet and filter dictionaries.
 export const fbApi = {
-  accounts: () => wait(db.fbAccounts.filter((a) => (a.buyer_id == null ? canSeeCampaign(null) : db.campaigns.some((c) => c.owner_id === a.buyer_id && canSeeCampaign(c.id)))).map((a) => ({ ...a, api_token: "", proxy: "" }))),
+  accounts: () => wait(db.fbAccounts.filter((a) => (a.buyer_id == null ? inRoleScope(null) : db.campaigns.some((c) => c.owner_id === a.buyer_id && inRoleScope(c.id)))).map((a) => ({ ...a, api_token: "", proxy: "" }))),
   // ad id → ad, ad set, campaign, account (the chain the click sheet shows)
   chain: (adId: string) => {
     const ad = db.fbAds.find((a) => a.id === adId)

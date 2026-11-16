@@ -6,8 +6,8 @@ Context: an in-house tracker (Keitaro analogue) for a 100+ person media-buying t
 
 ## Traffic routing
 - Campaign = approach + geo + buyer. Link: `https://<domain>/<alias>?<campaign parameters>` — the parameters (`sub_id_1…6`, `external_id`) carry the traffic-source macros (FB ad id goes to `sub_id_6`).
-- Streams: intercepting (`forced`, checked first, no weights), regular (always by weight), default (catch-all). A returning visitor always gets the same stream, landing and offer while the uniqueness period lasts (Keitaro «привязка до оффера»); neither is a campaign setting. Campaigns have no cost model, cost, traffic loss or API token fields: spend comes from the FB collector.
-- «Не учитывать в статистике» (`stats_excluded`): a test or service campaign keeps working but reports, dashboard and trends leave it out; the report can include it with the «Исключённые кампании» switch. Filters per stream (country, region, device, bot …, `meta.ts` STREAM_FILTERS).
+- Streams: intercepting (`forced`, checked first, no weights), regular (always by weight), default (catch-all). A returning visitor always gets the same stream, landing and offer while the uniqueness period lasts (Keitaro «привязка до оффера»); neither is a campaign setting. Filters per stream (country, region, device, bot …, `meta.ts` STREAM_FILTERS). Campaigns have no cost model, cost, traffic loss or API token fields: spend comes from the FB collector.
+- «Не учитывать в статистике» (`stats_excluded`): a test or service campaign keeps working but reports, dashboard and trends leave it out; the report can include it with the «Исключённые кампании» switch; a report filtered to that campaign always shows it.
 - Offer geo (`country`, `regions`) restricts routing: a stream picks an offer only among those allowed for the click's country / region; shares of the rest are renormalised; no allowed offer → the stream does not match and the click goes on.
 - Reference campaign (`is_template`) holds the standard streams; «Применить к кампаниям» copies them by name into linked campaigns (weights kept by default).
 

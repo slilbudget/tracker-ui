@@ -32,17 +32,40 @@ function grantOn(c: Campaign): "read" | "edit" | null {
   const g = viewerUser().grants.filter((x) => (x.kind === "campaign" && x.id === c.id) || (x.kind === "campaign_group" && x.id === c.group_id))
   return g.some((x) => x.level === "edit") ? "edit" : g.length ? "read" : null
 }
+// visible by the role alone (own / group / everything), without single-object grants
+function byRole(c: Campaign) {
+  if (groupIds === null) return true
+  if (viewerAccess("campaigns") === "none") return false
+  return c.owner_id === viewerId || (c.group_id != null && groupIds.includes(c.group_id))
+}
+// Visible campaign: by the role, or by a grant (Users → «Отдельные доступы»). Role «none» + grants = only the granted ones.
 export const canSeeCampaign = (id: number | null | undefined) => {
   if (groupIds === null) return true
   if (id == null) return false
   const c = campaignById(id)
-  return !!c && (c.owner_id === viewerId || (c.group_id != null && groupIds.includes(c.group_id)) || grantOn(c) != null)
+  return !!c && (byRole(c) || grantOn(c) != null)
 }
-// edit = the role lets the viewer change this campaign, or a grant gives «edit» on it or its group
-export function campaignAccess(id: number): "edit" | "read" | "none" {
+// Visible by the role only: things that belong to a buyer rather than to one campaign (ad accounts, their problems)
+// do not open up because of a grant on one of the buyer's campaigns.
+export const inRoleScope = (id: number | null | undefined) => {
+  if (groupIds === null) return true
+  if (id == null) return false
   const c = campaignById(id)
-  if (!c || !canSeeCampaign(id)) return "none"
-  const level = viewerAccess("campaigns")
-  const byRole = level === "full" || ((level === "own" || level === "groups") && (c.owner_id === viewerId || (c.group_id != null && (groupIds ?? []).includes(c.group_id))))
-  return byRole || grantOn(c) === "edit" ? "edit" : "read"
+  return !!c && byRole(c)
 }
+// What the viewer may do with a campaign and with its streams. Edit by the role = the resource level is full, or
+// own / groups and the campaign is in the role scope. An «edit» grant gives edit on both, a «read» grant on neither.
+export function campaignAccess(id: number): { level: "edit" | "read" | "none"; streams: "edit" | "read" | "none" } {
+  const c = campaignById(id)
+  if (!c || !canSeeCampaign(id)) return { level: "none", streams: "none" }
+  const grant = grantOn(c)
+  const edits = (r: "campaigns" | "streams") => {
+    const level = viewerAccess(r)
+    return level === "full" || ((level === "own" || level === "groups") && byRole(c)) || grant === "edit"
+  }
+  return { level: edits("campaigns") ? "edit" : "read", streams: edits("streams") ? "edit" : "read" }
+}
+export const canEditCampaign = (id: number) => campaignAccess(id).level === "edit"
+export const canEditStreams = (id: number) => campaignAccess(id).streams === "edit"
+// campaign groups the viewer gets through grants (to show them in group pickers)
+export const grantedGroupIds = () => viewerUser().grants.filter((g) => g.kind === "campaign_group").map((g) => g.id)
