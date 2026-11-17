@@ -110,6 +110,7 @@ export function Shell() {
     const h = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "c" || window.getSelection()?.toString()) return
       const el = document.activeElement?.closest<HTMLElement>("[data-slot=select-trigger], [role=option]")
+      if (el?.hasAttribute("data-placeholder")) return // nothing chosen: the text is the placeholder
       const text = el?.innerText.trim()
       if (!text) return
       e.preventDefault()

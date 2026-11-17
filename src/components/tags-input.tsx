@@ -1,4 +1,5 @@
 // Free tags: type and press Enter (or comma); existing tags are suggested. Backspace in an empty field removes the last one.
+import { normalizeTags } from "@/lib/tags"
 import { useId, useState } from "react"
 import { XIcon } from "lucide-react"
 import { Icon } from "@/components/icon"
@@ -13,9 +14,10 @@ export function TagsInput({ value, onChange, suggestions = [], disabled, placeho
 }) {
   const [text, setText] = useState("")
   const listId = useId()
+  // «a, b, c» (typed or pasted) adds three tags; a tag already there (any case) is skipped
   const add = (raw: string) => {
-    const t = raw.trim().replace(/,$/, "").trim()
-    if (t && !value.some((x) => x.toLowerCase() === t.toLowerCase())) onChange([...value, t])
+    const next = normalizeTags([...value, raw])
+    if (next.length !== value.length) onChange(next)
     setText("")
   }
   return (
@@ -35,8 +37,12 @@ export function TagsInput({ value, onChange, suggestions = [], disabled, placeho
           value={text}
           list={listId}
           onChange={(e) => (e.target.value.endsWith(",") ? add(e.target.value) : setText(e.target.value))}
+          onPaste={(e) => {
+            const t = e.clipboardData.getData("text")
+            if (t.includes(",")) { e.preventDefault(); add(text + t) }
+          }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); add(text) }
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); add(text) }
             if (e.key === "Backspace" && !text && value.length) onChange(value.slice(0, -1))
           }}
           onBlur={() => text.trim() && add(text)}
@@ -45,7 +51,7 @@ export function TagsInput({ value, onChange, suggestions = [], disabled, placeho
           className="h-6 min-w-24 flex-1 bg-transparent px-1 text-sm outline-none placeholder:text-muted-foreground"
         />
       )}
-      <datalist id={listId}>{suggestions.filter((s) => !value.includes(s)).map((s) => <option key={s} value={s} />)}</datalist>
+      <datalist id={listId}>{suggestions.filter((s) => !value.some((x) => x.toLowerCase() === s.toLowerCase())).map((s) => <option key={s} value={s} />)}</datalist>
     </div>
   )
 }

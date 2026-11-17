@@ -144,20 +144,25 @@ function metricsOf(a: Acc): Record<string, number> {
   }
 }
 
+const tagsOf = (campaignId: number) => { const t = camp.get(campaignId)?.tags ?? []; return t.length ? t : ["—"] }
+// a tag filter passes when at least one tag of the campaign fits it (an untagged campaign has the tag «—»)
+function tagsMatch(tags: string[], f: ReportFilter) {
+  const e = f.expression
+  const list = (Array.isArray(e) ? e : [e]).map(String)
+  const any = (pred: (t: string) => boolean) => tags.some(pred)
+  switch (f.operator) {
+    case "EQUALS": case "IN_LIST": return any((t) => list.includes(t))
+    case "NOT_EQUAL": case "NOT_IN_LIST": return !any((t) => list.includes(t))
+    case "CONTAINS": return any((t) => t.toLowerCase().includes(String(e).toLowerCase()))
+    case "NOT_CONTAIN": return !any((t) => t.toLowerCase().includes(String(e).toLowerCase()))
+    default: return true
+  }
+}
+
 function matches(c: Click, f: ReportFilter, tz: string) {
   const e = f.expression
   const list = (Array.isArray(e) ? e : [e]).map(String)
-  if (f.name === "campaign_tag") {
-    const tags = camp.get(c.campaign_id)?.tags ?? []
-    const any = (pred: (t: string) => boolean) => (tags.length ? tags.some(pred) : pred("—"))
-    switch (f.operator) {
-      case "EQUALS": case "IN_LIST": return any((t) => list.includes(t))
-      case "NOT_EQUAL": case "NOT_IN_LIST": return !any((t) => list.includes(t))
-      case "CONTAINS": return any((t) => t.toLowerCase().includes(String(e).toLowerCase()))
-      case "NOT_CONTAIN": return !any((t) => t.toLowerCase().includes(String(e).toLowerCase()))
-      default: return true
-    }
-  }
+  if (f.name === "campaign_tag") return tagsMatch(tagsOf(c.campaign_id), f)
   const v = dimensionValue(c, f.name, tz)
   switch (f.operator) {
     case "EQUALS": return v === String(e)
@@ -187,13 +192,16 @@ export function buildReport(req: ReportRequest): ReportResponse {
   // a filter on the campaign itself means «show this one»: links from the campaign page, problems, the click sheet
   const named = req.filters.some((f) => f.name === "campaign" || f.name === "campaign_id")
   const clicks = filterClicks(req).filter((c) => req.include_excluded || named || !excluded(c.campaign_id))
+  // grouped by tag with a tag filter: only the tags that fit the filter become rows (filter PWA → no row «iOS»)
+  const tagFilters = req.filters.filter((f) => f.name === "campaign_tag")
+  const rowTags = (campaignId: number) => tagsOf(campaignId).filter((t) => tagFilters.every((f) => tagsMatch([t], f)))
   const groups = new Map<string, { dims: string[]; acc: Acc }>()
   const total = empty()
   for (const c of clicks) {
     // a campaign with several tags counts under each of them (rows by tag may add up to more than the total)
     let combos: string[][] = [[]]
     for (const d of req.dimensions) {
-      const vs = d === "campaign_tag" ? (camp.get(c.campaign_id)?.tags.length ? camp.get(c.campaign_id)!.tags : ["—"]) : [dimensionValue(c, d, tz)]
+      const vs = d === "campaign_tag" ? rowTags(c.campaign_id) : [dimensionValue(c, d, tz)]
       combos = combos.flatMap((x) => vs.map((v) => [...x, v]))
     }
     for (const dims of combos) {

@@ -106,7 +106,7 @@ export default function ClicksLogPage() {
       downloadCsv(
         "clicks.csv",
         fields.map(([, label]) => label),
-        res.rows.map((c) => fields.map(([k]) => fieldText(k, c, names.data, timezone))),
+        res.rows.map((c) => fields.map(([k]) => fieldText(k, c, names.data, timezone, true))),
       )
       toast.success(`Выгружено строк: ${res.rows.length}`)
     } finally {

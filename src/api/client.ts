@@ -1,5 +1,6 @@
 // API client. Today it answers from the in-memory mock; each function is one backend endpoint.
 // Swap the bodies for fetch() calls when the Go API is ready, keeping the signatures.
+import { normalizeTags } from "@/lib/tags"
 import type {
   AffiliateNetwork, ApiKey, AuditEntry, Campaign, Click, Conversion, ConversionLogRow, DateRange, Domain, Group, GroupType, ID,
   Landing, Offer, PostbackLogEntry, ReportFilter, ReportRequest, ReportResponse, Role, Settings,
@@ -100,13 +101,14 @@ export const api = {
     access: (id: ID) => wait(campaignAccess(id)),
     update: (id: ID, patch: Partial<Campaign>) => {
       const c = db.campaigns.find((x) => x.id === id)
-      return editable(id) ?? (Object.assign(c!, patch, { updated_at: now() }), wait(c!))
+      const clean = patch.tags ? { ...patch, tags: normalizeTags(patch.tags) } : patch
+      return editable(id) ?? (Object.assign(c!, clean, { updated_at: now() }), wait(c!))
     },
     remove: (id: ID) => editable(id) ?? campaignCrud.remove(id),
     restore: (id: ID) => editable(id) ?? campaignCrud.restore(id),
     // the owner is the current user (the backend takes it from the session)
     create: (data: Omit<Campaign, "id">) => {
-      const c: Campaign = { ...data, id: nextId(db.campaigns), owner_id: viewerUser().id, created_at: now(), updated_at: now() }
+      const c: Campaign = { ...data, tags: normalizeTags(data.tags ?? []), id: nextId(db.campaigns), owner_id: viewerUser().id, created_at: now(), updated_at: now() }
       db.campaigns.push(c)
       return wait(c)
     },

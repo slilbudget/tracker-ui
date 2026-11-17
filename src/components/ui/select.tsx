@@ -49,6 +49,17 @@ function SelectTrigger({
   // unless the press selected some text. A disabled <fieldset> (read-only forms) keeps the list closed.
   const blocked = (e: React.SyntheticEvent<HTMLElement>) => !!e.currentTarget.closest("fieldset:disabled")
   const skipRadix = (e: React.SyntheticEvent) => { (e as unknown as { defaultPrevented: boolean }).defaultPrevented = true }
+  // a div has no native disabled state: the root <Select disabled> (Radix sets data-disabled) or a disabled fieldset
+  // take it out of the Tab order and announce it; checked after every render, the fieldset can change any time
+  const ref = React.useRef<HTMLDivElement>(null)
+  React.useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const off = el.hasAttribute("data-disabled") || !!el.closest("fieldset:disabled")
+    el.tabIndex = off ? -1 : 0
+    if (off) el.setAttribute("aria-disabled", "true")
+    else el.removeAttribute("aria-disabled")
+  })
   return (
     <SelectPrimitive.Trigger
       asChild
@@ -69,10 +80,10 @@ function SelectTrigger({
       }}
     >
       <div
+        ref={ref}
         data-slot="select-trigger"
         data-size={size}
         data-idle={React.useContext(IdleCtx) || undefined}
-        tabIndex={props.disabled ? -1 : 0}
         className={cn(
           "flex w-fit items-center justify-between gap-1.5 rounded-md border border-input bg-input/20 py-1.5 whitespace-nowrap outline-none focus-visible:border-ring focus-visible:ring-0 cursor-default select-text data-disabled:cursor-not-allowed data-disabled:opacity-50 in-[fieldset:disabled]:cursor-not-allowed in-[fieldset:disabled]:opacity-50 *:data-[slot=select-value]:pointer-events-auto! *:data-[slot=select-value]:select-text aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-idle:text-muted-foreground data-[size=default]:h-8 data-[size=default]:px-2.5 data-[size=default]:text-sm data-[size=sm]:h-7 data-[size=sm]:px-2 data-[size=sm]:text-xs *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
           className

@@ -55,6 +55,14 @@ export function StreamSheet({
   if (!open && loaded) setLoaded(null)
   if (!form) return null
   const set = <K extends keyof Stream>(k: K, v: Stream[K]) => setForm((f) => (f ? { ...f, [k]: v } : f))
+  // the action type belongs to the schema: «action» takes an action (404, other campaign…), the others a redirect type;
+  // a type of the other kind is reset, with its payload (a URL is not a campaign id)
+  const changeSchema = (schema: StreamSchema) => setForm((f) => {
+    if (!f) return f
+    const want = schema === "action" ? "action" : "redirect"
+    const kind = STREAM_ACTIONS.find((a) => a.key === f.action_type)?.kind
+    return kind === want ? { ...f, schema } : { ...f, schema, action_type: want === "action" ? "" : "http", action_payload: "" }
+  })
   const problems = [
     ...streamProblems(form),
     ...(form.type === "regular" && form.weight === 0 ? ["Вес 0 — поток не получит трафик"] : []),
@@ -125,7 +133,7 @@ export function StreamSheet({
           </TabsContent>
 
           <TabsContent value="schema" className="flex min-w-0 flex-col gap-4">
-            <ToggleGroup type="single" variant="outline" value={form.schema} onValueChange={(v) => v && set("schema", v as StreamSchema)} className="flex-wrap justify-start">
+            <ToggleGroup type="single" variant="outline" value={form.schema} onValueChange={(v) => v && changeSchema(v as StreamSchema)} className="flex-wrap justify-start">
               {STREAM_SCHEMAS.map((s) => <ToggleGroupItem key={s.value} value={s.value}>{s.label}</ToggleGroupItem>)}
             </ToggleGroup>
             <p className="-mt-2 text-xs text-muted-foreground">{SCHEMA_HINT[form.schema]}</p>

@@ -399,7 +399,7 @@ export interface ReportFilter {
 
 export interface ReportRequest {
   range: DateRange
-  dimensions: string[] // grouping, up to 5 levels
+  dimensions: string[] // grouping levels; the report asks one level per request (drill-down up to 10)
   measures: string[]
   filters: ReportFilter[]
   sort: { name: string; order: "ASC" | "DESC" }[]
@@ -457,7 +457,7 @@ export interface FbAdAccount {
 }
 // One account in the bulk JSON import («Импорт JSON» on Кабинеты). Currency, timezone and creation date come from FB.
 export interface AccountImportRow {
-  id: string // act_… (digits alone are accepted)
+  id: string // act_… (digits alone are accepted); a JSON string, never a number
   api_token: string
   proxy?: string // login:password@host:port or host:port
   buyer?: string // login; the account is assigned to them from today

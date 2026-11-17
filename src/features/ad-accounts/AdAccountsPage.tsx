@@ -8,6 +8,7 @@ import { toast } from "sonner"
 import { EyeIcon, FileJsonIcon, PlusIcon, XIcon } from "lucide-react"
 import type { AccountImportResult, AccountImportRow, AdAccountAssignment, AdFeePeriod, AdProvider, FbAdAccount, FbCampaign } from "@/api/types"
 import { api } from "@/api/client"
+import { ACCOUNT_ID_HINT, normalizeAccountId } from "@/api/client-accounts"
 import { useAccess, useApp, useUrlParam } from "@/app/state"
 import { Page, PageHeader, Toolbar } from "@/components/page"
 import { DataTable } from "@/components/data-table"
@@ -213,8 +214,8 @@ function AccountForm({ account, assignments, fees, unattributed, transfer, canEd
   })
   const submit = () => {
     const e: Record<string, string> = {}
-    if (!account && !/^act_\d+$/.test(f.id.trim())) e.id = "ID в формате act_1234567890"
-    if (!f.name.trim()) e.name = "Введите название"
+    // name may stay empty: the server takes it from FB
+    if (!account && !normalizeAccountId(f.id)) e.id = ACCOUNT_ID_HINT
     setErr(e)
     if (!Object.keys(e).length) save.mutate()
   }
@@ -567,39 +568,46 @@ function ImportAccountsButton() {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState("")
   const [parseError, setParseError] = useState("")
-  const [checked, setChecked] = useState<AccountImportResult[] | null>(null)
+  // the result of a check and the exact rows it was made for: «Добавить» sends these rows, not the current text
+  const [checked, setChecked] = useState<{ rows: AccountImportRow[]; results: AccountImportResult[] } | null>(null)
   const parse = (): AccountImportRow[] | null => {
-    try {
-      const v = JSON.parse(text)
-      const rows = Array.isArray(v) ? v : [v]
-      if (!rows.every((r) => r && typeof r === "object")) throw new Error("каждый кабинет — объект в фигурных скобках")
-      setParseError("")
-      return rows
-    } catch (e) {
-      setParseError(`Не JSON: ${(e as Error).message}. Сверьте с примером`)
+    let v: unknown
+    try { v = JSON.parse(text) } catch (e) {
+      setParseError(`Не получается прочитать JSON: ${(e as Error).message}. Сверьте с примером`)
       return null
     }
+    const rows = Array.isArray(v) ? v : [v]
+    if (!rows.length) { setParseError("Список пуст: добавьте хотя бы один кабинет"); return null }
+    if (!rows.every((r) => r && typeof r === "object" && !Array.isArray(r))) { setParseError("Каждый кабинет — объект в фигурных скобках { … }"); return null }
+    setParseError("")
+    return rows as AccountImportRow[]
   }
+  const refresh = () => ["adAccounts", "fbAccounts", "adFees", "adProviders", "problems", "report"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }))
   const check = useMutation({
-    mutationFn: (rows: AccountImportRow[]) => api.adAccounts.importJson(rows, false),
-    onSuccess: (r) => setChecked(r.results),
+    mutationFn: (rows: AccountImportRow[]) => api.adAccounts.importJson(rows, false).then((r) => ({ rows, results: r.results })),
+    onSuccess: setChecked,
     onError: (e: Error) => toast.error(e.message),
   })
   const apply = useMutation({
     mutationFn: (rows: AccountImportRow[]) => api.adAccounts.importJson(rows, true),
-    onSuccess: (r) => {
-      qc.invalidateQueries({ queryKey: ["adAccounts"] })
-      qc.invalidateQueries({ queryKey: ["fbAccounts"] })
+    onSuccess: (r, rows) => {
+      refresh()
       toast.success(`Добавлено кабинетов: ${r.created}`)
-      setOpen(false); setText(""); setChecked(null)
+      // rows with errors stay in the box with their reasons, to fix and send again
+      const failed = r.results.filter((x) => x.error)
+      if (!failed.length) { setOpen(false); setText(""); setChecked(null); return }
+      const left = failed.map((x) => rows[x.index])
+      setText(JSON.stringify(left, null, 2))
+      setChecked({ rows: left, results: failed.map((x, i) => ({ ...x, index: i })) })
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => { refresh(); toast.error(e.message) },
   })
-  const ok = checked?.filter((r) => !r.error).length ?? 0
+  const ok = checked?.results.filter((r) => !r.error).length ?? 0
+  const close = (v: boolean) => { setOpen(v); if (!v) { setChecked(null); setParseError("") } }
   return (
     <>
       <Button variant="outline" onClick={() => setOpen(true)}><Icon icon={FileJsonIcon} size={14} /> Импорт JSON</Button>
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={close}>
         <DialogContent className="flex max-h-[min(44rem,calc(100dvh-2rem))] flex-col sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Добавить кабинеты списком</DialogTitle>
@@ -614,7 +622,8 @@ function ImportAccountsButton() {
             <Textarea
               rows={10}
               value={text}
-              onChange={(e) => { setText(e.target.value); setChecked(null) }}
+              onChange={(e) => { setText(e.target.value); setChecked(null); setParseError("") }}
+              readOnly={check.isPending || apply.isPending}
               placeholder={IMPORT_EXAMPLE}
               className="font-mono text-xs"
               aria-label="JSON с кабинетами"
@@ -628,7 +637,7 @@ function ImportAccountsButton() {
                     <tr className="border-b"><th className="px-2 py-1.5 font-medium">#</th><th className="px-2 py-1.5 font-medium">ID</th><th className="px-2 py-1.5 font-medium">Проверка</th></tr>
                   </thead>
                   <tbody>
-                    {checked.map((r) => (
+                    {checked.results.map((r) => (
                       <tr key={r.index} className="border-b last:border-0">
                         <td className="num px-2 py-1.5 text-muted-foreground">{r.index + 1}</td>
                         <td className="px-2 py-1.5 font-mono">{r.id || "—"}</td>
@@ -641,9 +650,9 @@ function ImportAccountsButton() {
             )}
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)}>Отмена</Button>
+            <Button variant="outline" onClick={() => close(false)}>Отмена</Button>
             {checked && ok > 0
-              ? <Button disabled={apply.isPending} onClick={() => { const rows = parse(); if (rows) apply.mutate(rows) }}>Добавить {ok} {ok === checked.length ? "" : `из ${checked.length}`}</Button>
+              ? <Button disabled={apply.isPending} onClick={() => apply.mutate(checked.rows)}>Добавить {ok}{ok === checked.results.length ? "" : ` из ${checked.results.length}`}</Button>
               : <Button disabled={!text.trim() || check.isPending} onClick={() => { const rows = parse(); if (rows) check.mutate(rows) }}>Проверить</Button>}
           </DialogFooter>
         </DialogContent>

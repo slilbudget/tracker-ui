@@ -10,6 +10,14 @@ const ymd = (d: Date) => d.toISOString().slice(0, 10)
 // never asks a person for currency or timezone. The mock answers the same for every id.
 const fbLookup = (id: string) => ({ name: `FB ${id.slice(-4)}`, currency: "USD", timezone: "America/Los_Angeles", created_at: new Date(Date.now() - 30 * 86400000).toISOString() })
 const PROXY = /^([^:@\s]+:[^@\s]+@)?[\w.-]+:\d{2,5}$/
+// One rule for the form, create() and the JSON import: act_ and at least 5 digits; bare digits get act_ added.
+export const ACCOUNT_ID_HINT = "ID: act_ и не меньше 5 цифр, например act_1234567890"
+export function normalizeAccountId(raw: unknown): string | null {
+  if (typeof raw !== "string") return null
+  const v = raw.trim()
+  const id = /^\d+$/.test(v) ? `act_${v}` : v
+  return /^act_\d{5,}$/.test(id) ? id : null
+}
 type NewAccount = Omit<FbAdAccount, "buyer_id" | "agency" | "agency_fee" | "total_spend" | "spend_diff" | "fb_balance" | "balance_checked_at" | "last_error" | "disabled_at" | "currency" | "timezone" | "created_at">
 function insertAccount(v: NewAccount) {
   const fb = fbLookup(v.id)
@@ -60,8 +68,11 @@ export const accountsApi = {
   },
   // currency, timezone, FB creation date (and the name, if empty) are read from the FB API by the token
   create: (v: NewAccount) => {
-    if (db.fbAccounts.some((x) => x.id === v.id)) return Promise.reject(new Error("Кабинет с таким ID уже есть"))
-    const a = insertAccount(v)
+    if (viewerAccess("ad_accounts") !== "full") return Promise.reject(new Error("Добавлять кабинеты могут только админы"))
+    const id = normalizeAccountId(v.id)
+    if (!id) return Promise.reject(new Error(ACCOUNT_ID_HINT))
+    if (db.fbAccounts.some((x) => x.id === id)) return Promise.reject(new Error("Кабинет с таким ID уже есть"))
+    const a = insertAccount({ ...v, id })
     log(`Добавлен кабинет ${a.name} (${a.id})`)
     return wait(a)
   },
@@ -71,35 +82,48 @@ export const accountsApi = {
     if (viewerAccess("ad_accounts") !== "full") return Promise.reject(new Error("Добавлять кабинеты могут только админы"))
     const today = ymd(new Date())
     const seen = new Set<string>()
+    // the JSON comes from people: every field is checked for its type, a wrong one is an error of that row only
+    const str = (v: unknown) => (typeof v === "string" ? v.trim() : v == null ? "" : null)
     const results: AccountImportResult[] = rows.map((r, index) => {
-      const id = /^\d+$/.test(String(r.id ?? "").trim()) ? `act_${String(r.id).trim()}` : String(r.id ?? "").trim()
-      const buyer = r.buyer ? db.users.find((u) => u.login === r.buyer!.trim()) : undefined
-      const provider = r.provider ? db.adProviders.find((p) => p.name.toLowerCase() === r.provider!.trim().toLowerCase()) : undefined
+      const raw = r as unknown as Record<string, unknown>
+      const id = normalizeAccountId(raw.id)
+      const [token, proxy, login, prov, name, handed] = ["api_token", "proxy", "buyer", "provider", "name", "handed_at"].map((k) => str(raw[k]))
+      const fee = raw.fee
+      // the buyer must be an active user with a buyer role; the import follows «Передача кабинетов» like a manual assignment
+      const buyer = login ? db.users.find((u) => u.login === login) : undefined
+      const provider = prov ? db.adProviders.find((p) => p.name.toLowerCase() === prov.toLowerCase()) : undefined
+      const rule = transferRule({ buyer_id: null })
       const error =
-        !/^act_\d{5,}$/.test(id) ? "ID: нужен act_ и цифры"
+        typeof raw.id === "number" ? "id — строка в кавычках: длинные числа JSON искажает"
+        : !id ? ACCOUNT_ID_HINT
         : db.fbAccounts.some((x) => x.id === id) ? "Такой кабинет уже есть"
         : seen.has(id) ? "Повтор в этом списке"
-        : !String(r.api_token ?? "").trim() ? "Нет api_token"
-        : r.proxy && !PROXY.test(r.proxy.trim()) ? "Прокси: нужно login:password@host:port"
-        : r.buyer && !buyer ? `Нет пользователя «${r.buyer}»`
-        : r.provider && !provider ? `Нет провайдера «${r.provider}» (Кабинеты → Провайдеры)`
-        : r.fee != null && !(Number(r.fee) >= 0 && Number(r.fee) <= 100) ? "Комиссия — от 0 до 100"
-        : r.fee != null && !provider ? "Комиссия задаётся вместе с provider"
-        : r.handed_at && !/^\d{4}-\d{2}-\d{2}$/.test(r.handed_at) ? "handed_at: формат ГГГГ-ММ-ДД"
+        : [token, proxy, login, prov, name, handed].includes(null) ? "Текстовые поля — строки в кавычках"
+        : raw.multi_geo != null && typeof raw.multi_geo !== "boolean" ? "multi_geo — true или false"
+        : !token ? "Нет api_token"
+        : proxy && !PROXY.test(proxy) ? "Прокси: нужно login:password@host:port"
+        : login && !buyer ? `Нет пользователя «${login}»`
+        : buyer && (buyer.state !== "active" || ![3, 5].includes(buyer.role_id)) ? `«${login}» — не активный байер`
+        : buyer && !rule.can ? "Нет права «Передача кабинетов»: уберите buyer"
+        : prov && !provider ? `Нет провайдера «${prov}» (Кабинеты → Провайдеры)`
+        : fee != null && !(typeof fee === "number" && fee >= 0 && fee <= 100) ? "Комиссия — число от 0 до 100"
+        : fee != null && !provider ? "Комиссия задаётся вместе с provider"
+        : handed && (!/^\d{4}-\d{2}-\d{2}$/.test(handed) || isNaN(Date.parse(`${handed}T00:00:00Z`))) ? "handed_at: дата в формате ГГГГ-ММ-ДД"
         : ""
-      seen.add(id)
-      const warning = !error && !r.buyer ? "Без байера: кабинет будет свободным" : !error && !r.proxy ? "Без прокси" : ""
+      // only a row that passes counts as taken: a later valid copy of a broken row is not «a repeat»
+      if (!error) seen.add(id!)
+      const warning = !error && !login ? "Без байера: кабинет будет свободным" : !error && !proxy ? "Без прокси" : ""
       if (apply && !error) {
         const a = insertAccount({
-          id, name: r.name?.trim() ?? "", provider_id: provider?.id ?? null, api_token: String(r.api_token).trim(), proxy: r.proxy?.trim() ?? "",
-          active: true, handed_at: new Date(`${r.handed_at ?? today}T00:00:00Z`).toISOString(), spend_offset: 0, spend_diff_comment: "",
-          alert_on_spend_diff: 50, multi_geo: !!r.multi_geo,
+          id: id!, name: name ?? "", provider_id: provider?.id ?? null, api_token: token!, proxy: proxy ?? "",
+          active: true, handed_at: new Date(`${handed || today}T00:00:00Z`).toISOString(), spend_offset: 0, spend_diff_comment: "",
+          alert_on_spend_diff: 50, multi_geo: raw.multi_geo === true,
         })
-        if (buyer) db.adAssignments.push({ id: nextId(db.adAssignments), account_id: id, buyer_id: buyer.id, date_from: today, date_to: null })
-        if (provider && r.fee != null) db.adFees.push({ id: nextId(db.adFees), provider_id: provider.id, account_id: id, fee: Number(r.fee), date_from: today, comment: "Импорт JSON", created_by: viewerUser().id })
+        if (buyer) db.adAssignments.push({ id: nextId(db.adAssignments), account_id: id!, buyer_id: buyer.id, date_from: today, date_to: null })
+        if (provider && fee != null) db.adFees.push({ id: nextId(db.adFees), provider_id: provider.id, account_id: id!, fee: Number(fee), date_from: today, comment: "Импорт JSON", created_by: viewerUser().id })
         db.syncAccount(a)
       }
-      return { index, id, error, warning }
+      return { index, id: id ?? str(raw.id) ?? String(raw.id ?? ""), error, warning }
     })
     const created = apply ? results.filter((r) => !r.error).length : 0
     if (created) log(`Импорт кабинетов из JSON: добавлено ${created}`)

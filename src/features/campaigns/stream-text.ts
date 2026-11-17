@@ -25,6 +25,7 @@ export function streamProblems(s: Stream): string[] {
     if (s.offers.length && os !== 100) p.push(`Сумма долей офферов ${os}%`)
   }
   if (s.schema === "redirect" && !s.action_payload) p.push("Не указан URL")
+  if (s.schema === "action" && !s.action_type) p.push("Не выбрано действие")
   if (s.schema === "action" && s.action_type === "campaign" && !s.action_payload) p.push("Не выбрана кампания, куда отправлять трафик")
   if ([...s.landings, ...s.offers].some((x) => x.share < 0)) p.push("Доля не может быть отрицательной")
   return p

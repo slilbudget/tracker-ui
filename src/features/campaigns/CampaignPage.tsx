@@ -121,6 +121,8 @@ function CampaignPage({ id }: { id: string | undefined }) {
     onSuccess: (c) => {
       qc.setQueryData(["campaigns", cid], c)
       qc.invalidateQueries({ queryKey: ["campaigns"] })
+      // tags, name and «не учитывать в статистике» change grouped reports
+      qc.invalidateQueries({ queryKey: ["report"] })
       setForm(structuredClone(c))
       toast.success("Кампания сохранена")
     },

@@ -3,7 +3,7 @@ import { useState } from "react"
 import { Link } from "react-router"
 import { useQuery } from "@tanstack/react-query"
 import { CheckIcon, XIcon } from "lucide-react"
-import type { Click, Conversion } from "@/api/types"
+import type { Click, Conversion, ExtraSubId } from "@/api/types"
 import { api } from "@/api/client"
 import { type Names, type PathCheck } from "@/api/client-stats"
 import { useApp, useCanSeeMoney, useHiddenMetrics } from "@/app/state"
@@ -26,10 +26,13 @@ export const FIELD_LABELS: [keyof Click, string][] = [
   ["lp_clicked", "Клик по лендингу"], ["cost", "Расход"], ["external_id", "External ID"],
   ["sub_id_1", "sub_id_1 · Кабинет"], ["sub_id_2", "sub_id_2 · Плейсмент"], ["sub_id_3", "sub_id_3 · ID группы"],
   ["sub_id_4", "sub_id_4 · Группа"], ["sub_id_5", "sub_id_5 · Пиксель"], ["sub_id_6", "sub_id_6 · ID объявления"],
+  ...Array.from({ length: 24 }, (_, i) => [`sub_id_${i + 7}` as ExtraSubId, `sub_id_${i + 7}`] as [keyof Click, string]),
 ]
+// sub_id_7…30 are rarely filled: the sheet lists only the filled ones, the CSV always has all columns
+const EXTRA_SUB = /^sub_id_([7-9]|[12]\d|30)$/
 
-// Plain text of a click field (sheet and CSV): ids are resolved to names.
-export function fieldText(k: keyof Click, c: Click, nm: Names | undefined, tz: string): string {
+// Plain text of a click field (sheet and CSV): ids are resolved to names. csv: the country is the bare code, no flag.
+export function fieldText(k: keyof Click, c: Click, nm: Names | undefined, tz: string, csv = false): string {
   const v = c[k]
   if (v == null || v === "") return ""
   switch (k) {
@@ -41,7 +44,7 @@ export function fieldText(k: keyof Click, c: Click, nm: Names | undefined, tz: s
     case "ts_id": return nm?.sources[v as number] ?? String(v)
     case "buyer_id": return nm?.buyers[v as number] ?? String(v)
     case "device_type": return DEVICE[String(v)] ?? String(v)
-    case "country": return `${flag(String(v))} ${v}`.trim()
+    case "country": return csv ? String(v) : `${flag(String(v))} ${v}`.trim()
     case "cost": return fmtMoney(v as number)
     default: return typeof v === "boolean" ? (v ? "Да" : "Нет") : String(v)
   }
@@ -64,7 +67,7 @@ export function ClickSheet({ subId, onClose }: { subId: string; onClose: () => v
   })
   const c = click.data
   const nm = names.data
-  const fields = FIELD_LABELS.filter(([k]) => !(k === "cost" && hiddenMetrics.includes("cost")))
+  const fields = FIELD_LABELS.filter(([k]) => !(k === "cost" && hiddenMetrics.includes("cost")) && !(EXTRA_SUB.test(k) && !c?.[k]))
   return (
     <EntitySheet open={!!subId} onOpenChange={(v) => !v && onClose()} title={`Клик ${subId}`} description="Все поля клика, путь и конверсии" wide>
       {click.isLoading ? (

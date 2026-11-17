@@ -277,7 +277,8 @@ function LandingSheet({
     setErr(e)
     if (Object.keys(e).length) return
     // an external landing always has one of the three redirect types (http by default)
-    const action_type = form.landing_type === "external" ? (REDIRECT_TYPES.some((a) => a.key === form.action_type) ? form.action_type : "http") : form.action_type
+    // external: one of the three redirect types; local and preloaded pages are served by the tracker itself; action keeps its own
+    const action_type = form.landing_type === "external" ? (REDIRECT_TYPES.some((a) => a.key === form.action_type) ? form.action_type : "http") : form.landing_type === "action" ? form.action_type : "local_file"
     onSave({ ...form, action_type, id: landing?.id }, zip)
   }
 
