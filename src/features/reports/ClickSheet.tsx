@@ -12,7 +12,7 @@ import { Icon } from "@/components/icon"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { formatDateTime } from "@/lib/dates"
-import { fmtMoney } from "@/lib/format"
+import { flag, fmtMoney } from "@/lib/format"
 import { ConversionStatusCell, EntityLink, reportLink, useNames, type EntityKind } from "./shared"
 
 export const DEVICE: Record<string, string> = { mobile: "Телефон", desktop: "Компьютер", tablet: "Планшет" }
@@ -20,8 +20,9 @@ export const DEVICE: Record<string, string> = { mobile: "Телефон", deskto
 export const FIELD_LABELS: [keyof Click, string][] = [
   ["datetime", "Время клика"], ["sub_id", "Subid"], ["campaign_id", "Кампания"], ["stream_id", "Поток"], ["landing_id", "Лендинг"],
   ["offer_id", "Оффер"], ["ts_id", "Источник"], ["buyer_id", "Байер"], ["ip", "IP"], ["country", "Страна"], ["region", "Регион"], ["city", "Город"],
-  ["os", "ОС"], ["browser", "Браузер"], ["device_type", "Устройство"], ["device_model", "Модель устройства"],
-  ["connection_type", "Подключение"], ["is_bot", "Бот"], ["is_unique_campaign", "Уникальный (кампания)"], ["is_unique_stream", "Уникальный (поток)"],
+  ["os", "ОС"], ["os_version", "Версия ОС"], ["browser", "Браузер"], ["browser_version", "Версия браузера"], ["device_type", "Устройство"],
+  ["device_model", "Модель устройства"], ["user_agent", "User Agent"], ["language", "Язык браузера"],
+  ["connection_type", "Подключение"], ["isp", "Провайдер (ISP)"], ["operator", "Мобильный оператор"], ["referrer", "Реферер"], ["is_bot", "Бот"], ["is_unique_campaign", "Уникальный (кампания)"], ["is_unique_stream", "Уникальный (поток)"],
   ["lp_clicked", "Клик по лендингу"], ["cost", "Расход"], ["external_id", "External ID"],
   ["sub_id_1", "sub_id_1 · Кабинет"], ["sub_id_2", "sub_id_2 · Плейсмент"], ["sub_id_3", "sub_id_3 · ID группы"],
   ["sub_id_4", "sub_id_4 · Группа"], ["sub_id_5", "sub_id_5 · Пиксель"], ["sub_id_6", "sub_id_6 · ID объявления"],
@@ -40,6 +41,7 @@ export function fieldText(k: keyof Click, c: Click, nm: Names | undefined, tz: s
     case "ts_id": return nm?.sources[v as number] ?? String(v)
     case "buyer_id": return nm?.buyers[v as number] ?? String(v)
     case "device_type": return DEVICE[String(v)] ?? String(v)
+    case "country": return `${flag(String(v))} ${v}`.trim()
     case "cost": return fmtMoney(v as number)
     default: return typeof v === "boolean" ? (v ? "Да" : "Нет") : String(v)
   }

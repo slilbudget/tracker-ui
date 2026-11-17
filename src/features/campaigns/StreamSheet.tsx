@@ -5,6 +5,7 @@ import { PlusIcon, TriangleAlertIcon, XIcon } from "lucide-react"
 import type { Campaign, Landing, Offer, Stream, StreamSchema, StreamType } from "@/api/types"
 import { geoText, isRestricted } from "@/features/offers/caps"
 import { STREAM_ACTIONS, STREAM_SCHEMAS, STREAM_TYPES } from "@/api/meta"
+import { RedirectSelect } from "@/components/redirect-select"
 import { EntitySheet, FormRow } from "@/components/common"
 import { Icon } from "@/components/icon"
 import { Button } from "@/components/ui/button"
@@ -18,6 +19,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { FilterEditor } from "./FilterEditor"
 import { streamProblems } from "./stream-text"
+
+// what each schema does, in one line under the switch
+const SCHEMA_HINT: Record<string, string> = {
+  landings: "Посетитель видит лендинг (прелендинг), с него переходит на оффер. Без лендинга — сразу на оффер. Трафик делится между лендингами и офферами по долям.",
+  redirect: "Посетитель сразу уходит на один адрес (например, на вайт или на чужой трекер). Лендингов и офферов нет, их статистики тоже.",
+  action: "Без перехода: показать 404, текст, HTML или отправить клик в другую кампанию. Обычно для ботов и модерации.",
+}
 
 export function newStream(campaignId: number, position: number): Stream {
   return {
@@ -120,6 +128,7 @@ export function StreamSheet({
             <ToggleGroup type="single" variant="outline" value={form.schema} onValueChange={(v) => v && set("schema", v as StreamSchema)} className="flex-wrap justify-start">
               {STREAM_SCHEMAS.map((s) => <ToggleGroupItem key={s.value} value={s.value}>{s.label}</ToggleGroupItem>)}
             </ToggleGroup>
+            <p className="-mt-2 text-xs text-muted-foreground">{SCHEMA_HINT[form.schema]}</p>
 
             {form.schema === "landings" && (
               <>
@@ -154,11 +163,8 @@ export function StreamSheet({
 
             {form.schema === "redirect" && (
               <>
-                <FormRow label="Тип редиректа" hint={STREAM_ACTIONS.find((a) => a.key === form.action_type)?.description}>
-                  <Select value={form.action_type} onValueChange={(v) => set("action_type", v)}>
-                    <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                    <SelectContent>{STREAM_ACTIONS.filter((a) => a.kind === "redirect").map((a) => <SelectItem key={a.key} value={a.key}>{a.name}</SelectItem>)}</SelectContent>
-                  </Select>
+                <FormRow label="Тип редиректа">
+                  <RedirectSelect value={form.action_type} onChange={(v) => set("action_type", v)} />
                 </FormRow>
                 <FormRow label="URL" hint="Макросы: {subid}, {external_id}, {sub_id_1}…{sub_id_30}, {country}">
                   <Input value={form.action_payload} onChange={(e) => set("action_payload", e.target.value)} placeholder="https://" />

@@ -7,6 +7,8 @@ Context: an in-house tracker (Keitaro analogue) for a 100+ person media-buying t
 ## Traffic routing
 - Campaign = approach + geo + buyer. Link: `https://<domain>/<alias>?<campaign parameters>` — the parameters (`sub_id_1…6`, `external_id`) carry the traffic-source macros (FB ad id goes to `sub_id_6`).
 - Streams: intercepting (`forced`, checked first, no weights), regular (always by weight), default (catch-all). A returning visitor always gets the same stream, landing and offer while the uniqueness period lasts (Keitaro «привязка до оффера»); neither is a campaign setting. Filters per stream (country, region, device, bot …, `meta.ts` STREAM_FILTERS). Campaigns have no cost model, cost, traffic loss or API token fields: spend comes from the FB collector.
+- Tags (`Campaign.tags`): free labels («тест», «скейл», «iOS») for filters in the campaign list and the report («Тег кампании»; a campaign with several tags counts under each).
+- Redirect types (streams, landings, offers): only HTTP 302 (default, fastest), JS (an empty tracker page forwards the visitor; bots without JS stop) and «Без реферера» (like JS, the partner does not see the tracker domain).
 - «Не учитывать в статистике» (`stats_excluded`): a test or service campaign keeps working but reports, dashboard and trends leave it out; the report can include it with the «Исключённые кампании» switch; a report filtered to that campaign always shows it.
 - Offer geo (`country`, `regions`) restricts routing: a stream picks an offer only among those allowed for the click's country / region; shares of the rest are renormalised; no allowed offer → the stream does not match and the click goes on.
 - Reference campaign (`is_template`) holds the standard streams; «Применить к кампаниям» copies them by name into linked campaigns (weights kept by default).
@@ -26,7 +28,7 @@ Context: an in-house tracker (Keitaro analogue) for a 100+ person media-buying t
 - Attribution of spend to a tracker campaign: by the tracker campaign id at the start of the FB campaign name (`<id> | <date> | …`). No id or an unknown id → the spend is **unallocated** (`spend_diff`), shown per account with the FB campaigns that caused it; above the account's alert threshold → problem + Telegram.
 - Provider (agency or our farm) is set on the account once. Provider fee by period (`AdFeePeriod`: provider, all its accounts or one account, %, from date); the fee of a day = the latest row on or before that day, an account's own rows override the provider's. A raise never changes past spend. «Спэнд+%» = spend × (1 + fee of the day).
 - Account → buyer by period (`AdAccountAssignment`); spend of a day belongs to that day's buyer. Handing accounts over is a per-user right (`User.account_transfer`): `all` (assign free accounts, transfer, release) or `team` (between buyers of one's own team).
-- Token and proxy of an account: admins only.
+- Token and proxy of an account: admins only. Currency, timezone and the FB creation date come from the FB API, never typed in. Admins can add many accounts at once from JSON (id, token, proxy, buyer, provider, fee).
 
 ## Approaches and ad naming
 - Shared directory of approaches (name + code). Any buyer may add one while creating a campaign; rename / delete need settings rights.

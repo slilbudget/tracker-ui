@@ -6,6 +6,8 @@ There is **no backend yet**: the app runs on a fake API inside the browser (`src
 
 - [docs/backend.md](docs/backend.md) — what to build: endpoints, conventions, what the mock simplifies
 - [docs/domain.md](docs/domain.md) — business rules
+- [docs/data-architecture.md](docs/data-architecture.md) — data architecture for the data engineer (RU): sources, PostgreSQL / ClickHouse / Valkey / Temporal, report math
+- [docs/sprint-plan.md](docs/sprint-plan.md) — sprint plan from prototype to production (RU)
 - [CONVENTIONS.md](CONVENTIONS.md) — frontend structure and design rules
 
 Live demo: https://tracker-ui.lowiedollekamp-28f.workers.dev

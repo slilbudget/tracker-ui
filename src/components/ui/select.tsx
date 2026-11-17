@@ -43,21 +43,46 @@ function SelectTrigger({
 }: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
   size?: "sm" | "default"
 }) {
+  // The chosen value can be selected with the mouse and copied (owner 16/11). Chrome never starts a text selection
+  // inside a <button>, so the trigger is a focusable div (role combobox comes from Radix). Radix opens the list on
+  // pointerdown, which would kill the selection: here a press only starts a selection and the list opens on click,
+  // unless the press selected some text. A disabled <fieldset> (read-only forms) keeps the list closed.
+  const blocked = (e: React.SyntheticEvent<HTMLElement>) => !!e.currentTarget.closest("fieldset:disabled")
+  const skipRadix = (e: React.SyntheticEvent) => { (e as unknown as { defaultPrevented: boolean }).defaultPrevented = true }
   return (
     <SelectPrimitive.Trigger
-      data-slot="select-trigger"
-      data-size={size}
-      data-idle={React.useContext(IdleCtx) || undefined}
-      className={cn(
-        "flex w-fit items-center justify-between gap-1.5 rounded-md border border-input bg-input/20 py-1.5 whitespace-nowrap outline-none focus-visible:border-ring focus-visible:ring-0 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-idle:text-muted-foreground data-[size=default]:h-8 data-[size=default]:px-2.5 data-[size=default]:text-sm data-[size=sm]:h-7 data-[size=sm]:px-2 data-[size=sm]:text-xs *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        className
-      )}
+      asChild
       {...props}
+      onPointerDown={(e) => {
+        props.onPointerDown?.(e)
+        if ((e.pointerType === "mouse" && e.button === 0 && !e.ctrlKey) || blocked(e)) skipRadix(e)
+      }}
+      onClick={(e) => {
+        props.onClick?.(e)
+        const sel = window.getSelection()
+        const selected = !!sel && !sel.isCollapsed && !!sel.toString().trim() && e.currentTarget.contains(sel.anchorNode)
+        if (selected || blocked(e)) skipRadix(e)
+      }}
+      onKeyDown={(e) => {
+        props.onKeyDown?.(e)
+        if (blocked(e)) skipRadix(e)
+      }}
     >
-      {children}
-      <SelectPrimitive.Icon asChild>
-        <ChevronsUpDownIcon strokeWidth={2} className="pointer-events-none size-4 text-muted-foreground" />
-      </SelectPrimitive.Icon>
+      <div
+        data-slot="select-trigger"
+        data-size={size}
+        data-idle={React.useContext(IdleCtx) || undefined}
+        tabIndex={props.disabled ? -1 : 0}
+        className={cn(
+          "flex w-fit items-center justify-between gap-1.5 rounded-md border border-input bg-input/20 py-1.5 whitespace-nowrap outline-none focus-visible:border-ring focus-visible:ring-0 cursor-default select-text data-disabled:cursor-not-allowed data-disabled:opacity-50 in-[fieldset:disabled]:cursor-not-allowed in-[fieldset:disabled]:opacity-50 *:data-[slot=select-value]:pointer-events-auto! *:data-[slot=select-value]:select-text aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-idle:text-muted-foreground data-[size=default]:h-8 data-[size=default]:px-2.5 data-[size=default]:text-sm data-[size=sm]:h-7 data-[size=sm]:px-2 data-[size=sm]:text-xs *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+          className
+        )}
+      >
+        {children}
+        <SelectPrimitive.Icon asChild>
+          <ChevronsUpDownIcon strokeWidth={2} className="pointer-events-none size-4 text-muted-foreground" />
+        </SelectPrimitive.Icon>
+      </div>
     </SelectPrimitive.Trigger>
   )
 }

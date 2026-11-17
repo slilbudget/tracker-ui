@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router"
 import { useQuery } from "@tanstack/react-query"
+import { toast } from "sonner"
 import { ChevronDownIcon, MenuIcon, SearchIcon, TriangleAlertIcon, UserIcon } from "lucide-react"
 import type { Resource } from "@/api/types"
 import { api } from "@/api/client"
@@ -104,6 +105,19 @@ export function Shell() {
   const [mobile, setMobile] = useState(false)
   const [search, setSearch] = useState(false)
   useEffect(() => setMobile(false), [loc.pathname])
+  // Cmd/Ctrl+C on a focused dropdown (or a highlighted option in an open list) with nothing selected copies its text
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "c" || window.getSelection()?.toString()) return
+      const el = document.activeElement?.closest<HTMLElement>("[data-slot=select-trigger], [role=option]")
+      const text = el?.innerText.trim()
+      if (!text) return
+      e.preventDefault()
+      navigator.clipboard.writeText(text).then(() => toast.success(`Скопировано: ${text}`), () => {})
+    }
+    window.addEventListener("keydown", h)
+    return () => window.removeEventListener("keydown", h)
+  }, [])
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setSearch((v) => !v) }

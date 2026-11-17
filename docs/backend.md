@@ -17,7 +17,7 @@ The frontend is complete enough to define the backend. It runs on an in-browser 
 
 ## Endpoints
 
-160 functions. Generic CRUD (`list`, `archived`, `get`, `create`, `update`, `remove` = move to archive, `restore`) behaves the same for every entity that has `state`. `stats(range)` returns `{ [entityId]: { clicks, leads, sales, cost, revenue, … } }` for list pages.
+161 functions. Generic CRUD (`list`, `archived`, `get`, `create`, `update`, `remove` = move to archive, `restore`) behaves the same for every entity that has `state`. `stats(range)` returns `{ [entityId]: { clicks, leads, sales, cost, revenue, … } }` for list pages.
 
 | Group | Functions |
 |---|---|
@@ -28,7 +28,7 @@ The frontend is complete enough to define the backend. It runs on an in-browser 
 | `offerGroups` | `list`, `caps`, `stats`, `create`, `update`, `remove` |
 | `offerSwap` | `preview`, `usage`, `apply`, `undo`, `history` |
 | `problems` | `list`, `count`, `mute`, `resolve`, `reopen`, `checks`, `saveChecks` |
-| `adAccounts` | `list`, `get`, `create`, `update`, `assign`, `release` |
+| `adAccounts` | `list`, `get`, `create`, `importJson`, `update`, `assign`, `release` |
 | `adAccounts.providers` | `list`, `create`, `update` |
 | `adAccounts.fees` | `list`, `create`, `remove` |
 | `approaches` | `list`, `create`, `update`, `remove` |
@@ -76,6 +76,10 @@ Suggested REST mapping: `GET /campaigns`, `GET /campaigns/:id`, `POST /campaigns
 - **Secrets.** FB account `api_token` / `proxy` and integration `token` / `proxy_password` are write-only for non-admins: lists return a mask (`EAAG…abcd`, «задан»), `get` returns the value only with full access. Encrypt at rest. Never accept a masked value back as a new secret.
 - **Server-owned fields.** `id`, `created_at`, `updated_at`, `owner_id` (from the session), computed fields (`FbAdAccount.buyer_id / agency / agency_fee / total_spend / spend_diff`, `Offer.payout_value` as the current rate) are never taken from the request.
 - **Excluded campaigns.** `Campaign.stats_excluded` («Не учитывать в статистике») does not change routing. `reports.build` skips such campaigns unless `include_excluded: true` (report switch «Исключённые кампании», default false) or a filter names the campaign (`campaign` / `campaign_id`: links from the campaign page, problems, the click sheet); dashboard and trends always skip them; entity stats (`stats(range)`) skip them except for the campaign and stream lists. Logs show every click and conversion.
+- **Campaign tags.** `Campaign.tags: string[]` (free text). Report dimension `campaign_tag`: a click of a campaign with several tags is counted under **each** tag (rows may add up to more than the total); filters on `campaign_tag` match if **any** tag matches.
+- **Redirect types.** Streams, landings and offers use only `http` (302), `js` and `blank_referrer` (`action_type`). Old values may exist in imported data; the UI shows them as «больше не используется».
+- **Ad account currency / timezone / FB creation date** are read from the FB API by the account token (`GET /act_…?fields=name,currency,timezone_name,created_time`); `create` and `importJson` never take them from the client. `importJson(rows, apply)`: `apply=false` validates every row and returns `{ index, id, error, warning }[]`; `apply=true` adds the rows without errors (account, assignment from today if `buyer`, account-level fee from today if `fee` + `provider`). Format: `AccountImportRow` in types.ts.
+- **Click fields.** `Click` carries everything the logs and reports can show (Keitaro's list): geo, `os_version`, `browser_version`, `user_agent`, `language`, `isp`, `operator`, `referrer`, `sub_id_1…sub_id_30`. Every one of them is also a report dimension (`meta.ts` DIMENSIONS).
 - **Column settings.** The clicks and conversions logs keep the chosen columns and their order per user (`trk.logcols.*` in localStorage now; move to user preferences). `conversions.log` rows carry the click fields (`ConversionLogRow.click`: geo, device, `sub_id_1…6`, `external_id`, source).
 - **Audit.** Every change writes `AuditEntry` (who, what, when, IP).
 

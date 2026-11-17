@@ -17,9 +17,9 @@ import { Button } from "@/components/ui/button"
 import { ColumnsButton, useColumnChoice, type ColumnChoice } from "@/components/columns-dialog"
 import { formatDateTime } from "@/lib/dates"
 import { fmtMoney } from "@/lib/format"
-import { ClickSheet, DEVICE, FIELD_LABELS, fieldText } from "./ClickSheet"
+import { ClickSheet, FIELD_LABELS, fieldText } from "./ClickSheet"
 import { FilterBuilder, RELAX_HINT, hasExactFilter } from "./FilterBuilder"
-import { CampaignSelect, Clip, EntityName, decodeFilters, encodeFilters, reportLink, SUBS, SUB_ALIASES, useColumnPrefixes, usePage, useNames } from "./shared"
+import { CampaignSelect, Clip, EntityName, decodeFilters, encodeFilters, reportLink, CLICK_FIELDS, useColumnPrefixes, usePage, useNames } from "./shared"
 
 const DEFAULT_COLS = ["campaign", "stream", "landing", "offer", "country", "is_bot", "is_unique", "cost"]
 
@@ -83,17 +83,8 @@ export default function ClicksLogPage() {
     add("ID", "stream_id", "ID потока", (c) => c.stream_id, { meta: { align: "right" } })
     add("ID", "landing_id", "ID лендинга", (c) => c.landing_id ?? "—", { meta: { align: "right" } })
     add("ID", "offer_id", "ID оффера", (c) => c.offer_id ?? "—", { meta: { align: "right" } })
-    add("ID", "external_id", "External ID", (c) => c.external_id, { cell: ({ row }) => <span className="font-mono">{row.original.external_id}</span> })
-    for (const k of SUBS) add("Параметры", k, `${k} · ${SUB_ALIASES[k]}`, (c) => c[k], {}, SUB_ALIASES[k])
-    add("Гео", "country", "Страна", (c) => c.country)
-    add("Гео", "region", "Регион", (c) => c.region)
-    add("Гео", "city", "Город", (c) => c.city)
-    add("Устройство", "device", "Устройство", (c) => DEVICE[c.device_type] ?? c.device_type)
-    add("Устройство", "device_model", "Модель устройства", (c) => c.device_model)
-    add("Устройство", "os", "ОС", (c) => c.os)
-    add("Устройство", "browser", "Браузер", (c) => c.browser)
-    add("Соединение", "ip", "IP", (c) => c.ip, { cell: ({ row }) => <span className="font-mono">{row.original.ip}</span> })
-    add("Соединение", "connection_type", "Подключение", (c) => c.connection_type || "—")
+    // geo (with the flag), device, connection, every sub_id: the same list as in the conversions log
+    for (const f of CLICK_FIELDS) add(f.id.startsWith("sub_id") || f.id === "external_id" ? "Параметры" : f.group, f.id, f.label, (c) => f.value(c) || "—", f.mono ? { cell: ({ row }) => <span className="font-mono">{f.value(row.original) || "—"}</span> } : {}, f.header ?? f.label)
     add("Признаки", "is_bot", "Бот", (c) => (c.is_bot ? "Да" : "—"), { cell: ({ row }) => yes(row.original.is_bot) })
     add("Признаки", "is_unique", "Уникальный (кампания)", (c) => (c.is_unique_campaign ? "Да" : "—"), { cell: ({ row }) => yes(row.original.is_unique_campaign) }, "Уник.")
     add("Признаки", "is_unique_stream", "Уникальный (поток)", (c) => (c.is_unique_stream ? "Да" : "—"), { cell: ({ row }) => yes(row.original.is_unique_stream) }, "Уник. поток")

@@ -2,7 +2,8 @@
 import { useMemo, useState } from "react"
 import { Link } from "react-router"
 import { useQueries, useQuery } from "@tanstack/react-query"
-import type { ConversionStatus, DateRange, ReportFilter } from "@/api/types"
+import type { ClickFields, ConversionStatus, DateRange, ExtraSubId, ReportFilter } from "@/api/types"
+import { flag } from "@/lib/format"
 import { api } from "@/api/client"
 
 import { COUNTRIES, REJECT_REASONS, STREAM_FILTERS } from "@/api/meta"
@@ -29,6 +30,36 @@ export const SUB_ALIASES: Record<string, string> = {
   sub_id_1: "Кабинет", sub_id_2: "Плейсмент", sub_id_3: "ID группы", sub_id_4: "Группа", sub_id_5: "Пиксель", sub_id_6: "ID объявления",
 }
 export const SUBS = ["sub_id_1", "sub_id_2", "sub_id_3", "sub_id_4", "sub_id_5", "sub_id_6"] as const
+
+// Visitor fields of a click, shared by the clicks log and the conversions log (Keitaro's column list):
+// geo with the flag, device, connection, every sub_id. `mono` = shown in a monospace font.
+export interface ClickField { id: string; label: string; group: string; header?: string; mono?: boolean; value: (c: ClickFields) => string }
+export const CLICK_FIELDS: ClickField[] = [
+  { id: "flag", label: "Флаг страны", header: "Флаг", group: "Гео", value: (c) => flag(c.country) },
+  { id: "country", label: "Страна", group: "Гео", value: (c) => `${flag(c.country)} ${c.country}`.trim() },
+  { id: "region", label: "Регион", group: "Гео", value: (c) => c.region },
+  { id: "city", label: "Город", group: "Гео", value: (c) => c.city },
+  { id: "language", label: "Язык браузера", header: "Язык", group: "Гео", value: (c) => c.language },
+  { id: "device", label: "Тип устройства", header: "Устройство", group: "Устройство", value: (c) => DEVICE_LABEL[c.device_type] ?? c.device_type },
+  { id: "device_model", label: "Модель устройства", header: "Модель", group: "Устройство", value: (c) => c.device_model },
+  { id: "os", label: "ОС", group: "Устройство", value: (c) => c.os },
+  { id: "os_version", label: "Версия ОС", group: "Устройство", value: (c) => c.os_version },
+  { id: "browser", label: "Браузер", group: "Устройство", value: (c) => c.browser },
+  { id: "browser_version", label: "Версия браузера", group: "Устройство", value: (c) => c.browser_version },
+  { id: "user_agent", label: "User Agent", group: "Устройство", mono: true, value: (c) => c.user_agent },
+  { id: "ip", label: "IP", group: "Соединение", mono: true, value: (c) => c.ip },
+  { id: "connection_type", label: "Подключение", group: "Соединение", value: (c) => c.connection_type },
+  { id: "isp", label: "Провайдер (ISP)", header: "ISP", group: "Соединение", value: (c) => c.isp },
+  { id: "operator", label: "Мобильный оператор", header: "Оператор", group: "Соединение", value: (c) => c.operator },
+  { id: "referrer", label: "Реферер", group: "Соединение", value: (c) => c.referrer },
+  { id: "external_id", label: "External ID", group: "Параметры", mono: true, value: (c) => c.external_id },
+  ...SUBS.map((k): ClickField => ({ id: k, label: `${k} · ${SUB_ALIASES[k]}`, header: SUB_ALIASES[k], group: "Параметры", value: (c) => c[k] })),
+  ...Array.from({ length: 24 }, (_, i): ClickField => {
+    const k = `sub_id_${i + 7}` as ExtraSubId
+    return { id: k, label: k, group: "Параметры", value: (c) => c[k] ?? "" }
+  }),
+]
+const DEVICE_LABEL: Record<string, string> = { mobile: "Телефон", desktop: "Компьютер", tablet: "Планшет" }
 
 export function useNames() {
   return useQuery({ queryKey: ["names"], queryFn: api.stats.names, staleTime: 60_000 })
@@ -217,6 +248,7 @@ export function useDictionaries(): Record<string, Option[]> {
       buyer: (users ?? []).filter((u) => u.role_id === 3 || u.role_id === 5).map((u) => ({ value: u.login, label: u.login === u.name ? u.login : `${u.login} — ${u.name}` })),
       team: plain((users ?? []).map((u) => u.team).filter((t) => t !== "—")),
       approach: plain((approaches ?? []).map((a) => a.name)),
+      campaign_tag: plain((campaigns ?? []).flatMap((c) => c.tags)),
       product: plain((offerGroups ?? []).map((g) => g.product)),
       agency: plain((accounts ?? []).map((a) => a.agency)),
       fb_account: (accounts ?? []).map((a) => ({ value: `${a.name} · ${a.id}`, label: `${a.name} · ${a.id}` })),

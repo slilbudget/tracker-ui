@@ -29,3 +29,7 @@ export function signClass(key: string, v: unknown) {
   if (!metricDef(key)?.signed || typeof v !== "number" || v === 0) return ""
   return v > 0 ? "text-success" : "text-destructive"
 }
+
+// ISO-2 country code → flag emoji (US → 🇺🇸); anything else as is
+export const flag = (cc: string) =>
+  /^[A-Za-z]{2}$/.test(cc) ? String.fromCodePoint(...[...cc.toUpperCase()].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65)) : ""

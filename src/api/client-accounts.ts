@@ -1,11 +1,26 @@
 // Ad accounts («Кабинеты»), their assignment to buyers by period, the providers who gave them and the provider fee by period.
 // Same contract style as client.ts: each function is one backend endpoint.
-import type { AdFeePeriod, AdProvider, FbAdAccount, ID } from "./types"
+import type { AccountImportResult, AccountImportRow, AdFeePeriod, AdProvider, FbAdAccount, ID } from "./types"
 import * as db from "@/mock/seed"
 import { inRoleScope, viewerAccess, viewerUser } from "@/mock/scope"
 import { audit, nextId, wait } from "./mock-util"
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10)
+// What the FB API returns for an account (GET /act_…?fields=name,currency,timezone_name,created_time): the tracker
+// never asks a person for currency or timezone. The mock answers the same for every id.
+const fbLookup = (id: string) => ({ name: `FB ${id.slice(-4)}`, currency: "USD", timezone: "America/Los_Angeles", created_at: new Date(Date.now() - 30 * 86400000).toISOString() })
+const PROXY = /^([^:@\s]+:[^@\s]+@)?[\w.-]+:\d{2,5}$/
+type NewAccount = Omit<FbAdAccount, "buyer_id" | "agency" | "agency_fee" | "total_spend" | "spend_diff" | "fb_balance" | "balance_checked_at" | "last_error" | "disabled_at" | "currency" | "timezone" | "created_at">
+function insertAccount(v: NewAccount) {
+  const fb = fbLookup(v.id)
+  const a: FbAdAccount = {
+    ...v, name: v.name || fb.name, currency: fb.currency, timezone: fb.timezone, created_at: fb.created_at,
+    buyer_id: null, agency: "", agency_fee: 0, total_spend: 0, spend_diff: 0, fb_balance: 0, balance_checked_at: null, last_error: "", disabled_at: null,
+  }
+  db.syncAccount(a)
+  db.fbAccounts.push(a)
+  return a
+}
 const mask = (t: string) => (t.length > 10 ? `${t.slice(0, 4)}…${t.slice(-4)}` : t ? "…" : "")
 
 // A viewer sees accounts of buyers whose campaigns their role covers; free accounts only with full scope.
@@ -43,13 +58,52 @@ export const accountsApi = {
       transfer: transferRule(a),
     })
   },
-  create: (v: Omit<FbAdAccount, "buyer_id" | "agency" | "agency_fee" | "total_spend" | "spend_diff" | "fb_balance" | "balance_checked_at" | "last_error" | "disabled_at">) => {
+  // currency, timezone, FB creation date (and the name, if empty) are read from the FB API by the token
+  create: (v: NewAccount) => {
     if (db.fbAccounts.some((x) => x.id === v.id)) return Promise.reject(new Error("Кабинет с таким ID уже есть"))
-    const a: FbAdAccount = { ...v, buyer_id: null, agency: "", agency_fee: 0, total_spend: 0, spend_diff: 0, fb_balance: 0, balance_checked_at: null, last_error: "", disabled_at: null }
-    db.syncAccount(a)
-    db.fbAccounts.push(a)
+    const a = insertAccount(v)
     log(`Добавлен кабинет ${a.name} (${a.id})`)
     return wait(a)
+  },
+  // Bulk add from JSON (full access). apply = false: only check every row; apply = true: add the rows without errors.
+  // Per row: the account (currency / timezone from FB), the buyer from today, the account's own fee from today.
+  importJson: (rows: AccountImportRow[], apply: boolean) => {
+    if (viewerAccess("ad_accounts") !== "full") return Promise.reject(new Error("Добавлять кабинеты могут только админы"))
+    const today = ymd(new Date())
+    const seen = new Set<string>()
+    const results: AccountImportResult[] = rows.map((r, index) => {
+      const id = /^\d+$/.test(String(r.id ?? "").trim()) ? `act_${String(r.id).trim()}` : String(r.id ?? "").trim()
+      const buyer = r.buyer ? db.users.find((u) => u.login === r.buyer!.trim()) : undefined
+      const provider = r.provider ? db.adProviders.find((p) => p.name.toLowerCase() === r.provider!.trim().toLowerCase()) : undefined
+      const error =
+        !/^act_\d{5,}$/.test(id) ? "ID: нужен act_ и цифры"
+        : db.fbAccounts.some((x) => x.id === id) ? "Такой кабинет уже есть"
+        : seen.has(id) ? "Повтор в этом списке"
+        : !String(r.api_token ?? "").trim() ? "Нет api_token"
+        : r.proxy && !PROXY.test(r.proxy.trim()) ? "Прокси: нужно login:password@host:port"
+        : r.buyer && !buyer ? `Нет пользователя «${r.buyer}»`
+        : r.provider && !provider ? `Нет провайдера «${r.provider}» (Кабинеты → Провайдеры)`
+        : r.fee != null && !(Number(r.fee) >= 0 && Number(r.fee) <= 100) ? "Комиссия — от 0 до 100"
+        : r.fee != null && !provider ? "Комиссия задаётся вместе с provider"
+        : r.handed_at && !/^\d{4}-\d{2}-\d{2}$/.test(r.handed_at) ? "handed_at: формат ГГГГ-ММ-ДД"
+        : ""
+      seen.add(id)
+      const warning = !error && !r.buyer ? "Без байера: кабинет будет свободным" : !error && !r.proxy ? "Без прокси" : ""
+      if (apply && !error) {
+        const a = insertAccount({
+          id, name: r.name?.trim() ?? "", provider_id: provider?.id ?? null, api_token: String(r.api_token).trim(), proxy: r.proxy?.trim() ?? "",
+          active: true, handed_at: new Date(`${r.handed_at ?? today}T00:00:00Z`).toISOString(), spend_offset: 0, spend_diff_comment: "",
+          alert_on_spend_diff: 50, multi_geo: !!r.multi_geo,
+        })
+        if (buyer) db.adAssignments.push({ id: nextId(db.adAssignments), account_id: id, buyer_id: buyer.id, date_from: today, date_to: null })
+        if (provider && r.fee != null) db.adFees.push({ id: nextId(db.adFees), provider_id: provider.id, account_id: id, fee: Number(r.fee), date_from: today, comment: "Импорт JSON", created_by: viewerUser().id })
+        db.syncAccount(a)
+      }
+      return { index, id, error, warning }
+    })
+    const created = apply ? results.filter((r) => !r.error).length : 0
+    if (created) log(`Импорт кабинетов из JSON: добавлено ${created}`)
+    return wait({ results, created })
   },
   // Writable fields only. Without full access: the spend comment and the alert threshold.
   // Computed fields (buyer, provider name, fee, spend) are never taken from the client.
@@ -57,7 +111,7 @@ export const accountsApi = {
     const a = db.fbAccounts.find((x) => x.id === id)
     if (!a || !visible(a)) return Promise.reject(new Error("Кабинет не найден"))
     const keys: (keyof FbAdAccount)[] = viewerAccess("ad_accounts") === "full"
-      ? ["name", "provider_id", "api_token", "proxy", "active", "currency", "timezone", "handed_at", "spend_offset", "spend_diff_comment", "alert_on_spend_diff", "multi_geo"]
+      ? ["name", "provider_id", "api_token", "proxy", "active", "handed_at", "spend_offset", "spend_diff_comment", "alert_on_spend_diff", "multi_geo"]
       : ["spend_diff_comment", "alert_on_spend_diff"]
     const patch: Partial<FbAdAccount> = Object.fromEntries(keys.filter((k) => k in input).map((k) => [k, input[k]]))
     if (patch.alert_on_spend_diff != null && patch.alert_on_spend_diff < 0) return Promise.reject(new Error("Порог алерта не может быть отрицательным"))

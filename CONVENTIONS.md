@@ -34,7 +34,7 @@ react-router v8 (hash router), lucide-react icons (directly or via `@/components
 - `src/features/<section>/` one folder per section. Do not edit other sections' folders.
 - Shared: `components/page.tsx` (Page, PageHeader, Toolbar, Section), `components/data-table.tsx` (DataTable),
   `components/common.tsx` (StateDot, SearchInput, StateFilter, metricColumns, metricSummary, ConfirmDialog, EntitySheet, FormRow,
-  CopyButton, downloadCsv), `components/period-select.tsx`, `components/slicer.tsx` («Поле: все ▾» multi-pick), `components/columns-dialog.tsx` (log column settings: all fields by group + order), `app/state.tsx` (useAccess, useHiddenMetrics, usePeriod, useUrlParam).
+  CopyButton, downloadCsv), `components/period-select.tsx`, `components/slicer.tsx` («Поле: все ▾» multi-pick), `components/columns-dialog.tsx` (log column settings: all fields by group + order), `components/redirect-select.tsx` (the three redirect types with explanations), `components/tags-input.tsx`, `app/state.tsx` (useAccess, useHiddenMetrics, usePeriod, useUrlParam).
 - Reference implementation of a list section: `src/features/landings/LandingsPage.tsx`. Copy its structure.
 
 ## Patterns
@@ -69,3 +69,5 @@ react-router v8 (hash router), lucide-react icons (directly or via `@/components
 - Spend: no BM / System User tokens in the tracker for now. Costs come from the team's own collector through `api.campaigns.updateCosts` (per ad / day) and by hand: campaign menu → «Обновить расходы».
 
 Business rules (offers and caps, FB data, ad accounts, approaches, problems) are in [docs/domain.md](docs/domain.md); keep that file and the «Для IT» notes (`src/features/devnotes/notes.tsx`) in step with the code.
+
+- Dropdowns (`components/ui/select.tsx`): the trigger is a focusable div, not a button, so the chosen value can be selected with the mouse and copied; the list opens on click (not on press). Cmd/Ctrl+C on a focused dropdown copies its value (`app/shell.tsx`). Inside a disabled `<fieldset>` the list stays closed.

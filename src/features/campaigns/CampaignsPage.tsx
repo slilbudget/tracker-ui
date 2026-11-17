@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react"
-import { useNavigate } from "react-router"
+import { Link, useNavigate } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { toast } from "sonner"
-import { PlusIcon } from "lucide-react"
+import { ChartColumnIcon, PlusIcon } from "lucide-react"
 import type { Campaign } from "@/api/types"
 import { api } from "@/api/client"
 import { ApproachSelect } from "./ApproachSelect"
@@ -15,6 +15,8 @@ import {
   ConfirmDialog, CopyButton, EntitySheet, FormRow, SearchInput, EntityName, StateFilter, metricColumns, metricSummary,
 } from "@/components/common"
 import { Icon } from "@/components/icon"
+import { Slicer } from "@/components/slicer"
+import { TagChips } from "@/components/tags-input"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -33,6 +35,8 @@ export default function CampaignsPage() {
   const [state, setState] = useUrlParam("state")
   const [group, setGroup] = useUrlParam("group")
   const [source, setSource] = useUrlParam("source")
+  const [tagsRaw, setTagsRaw] = useUrlParam("tags")
+  const tags = useMemo(() => (tagsRaw ? tagsRaw.split(",") : []), [tagsRaw])
   const [creating, setCreating] = useUrlParam("edit")
   const [toArchive, setToArchive] = useState<Campaign[] | null>(null)
 
@@ -54,10 +58,11 @@ export default function CampaignsPage() {
           (!q || c.name.toLowerCase().includes(q.toLowerCase()) || String(c.id) === q || c.alias === q) &&
           (!state || c.state === state) &&
           (!group || String(c.group_id) === group) &&
-          (!source || String(c.traffic_source_id) === source),
+          (!source || String(c.traffic_source_id) === source) &&
+          (!tags.length || c.tags.some((t) => tags.includes(t))),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [list.data, q, state, group, source, stats.data, groups.data, streams.data, domains.data],
+    [list.data, q, state, group, source, tags, stats.data, groups.data, streams.data, domains.data],
   )
 
   const bulk = useMutation({
@@ -86,7 +91,7 @@ export default function CampaignsPage() {
       const src = sources.data?.find((s) => s.id === c.traffic_source_id)
       const created = await api.campaigns.create({
         ...c, is_template: false, template_id, alias: Math.random().toString(36).slice(2, 10), state: "active", uniqueness_method: "ip_ua",
-        uniqueness_use_cookies: true, cookies_ttl: 24, stats_excluded: false,
+        uniqueness_use_cookies: true, cookies_ttl: 24, stats_excluded: false, tags: [],
         parameters: src ? structuredClone(src.parameters) : [], postbacks: [], notes: "", owner_id: 0, // the API sets the owner from the session
         created_at: "", updated_at: "",
       })
@@ -113,6 +118,17 @@ export default function CampaignsPage() {
             <EntityName state={row.original.state} name={row.original.name} />
             {row.original.is_template && <span className="shrink-0 rounded-sm border px-1 text-xs text-muted-foreground">эталон</span>}
             {row.original.stats_excluded && <span className="shrink-0 rounded-sm border px-1 text-xs text-warning" title="Не учитывается в отчётах, дашборде и трендах">не в статистике</span>}
+            <TagChips tags={row.original.tags} />
+            {/* straight to the report of this campaign, by stream (like the report icon in Keitaro's list) */}
+            <Link
+              to={`/reports?f_campaign=${encodeURIComponent(row.original.name)}&g=stream`}
+              onClick={(e) => e.stopPropagation()}
+              title="Отчёт по кампании"
+              aria-label={`Отчёт по кампании ${row.original.name}`}
+              className="ml-auto shrink-0 rounded-sm p-1 text-muted-foreground hover:text-foreground"
+            >
+              <Icon icon={ChartColumnIcon} size={14} />
+            </Link>
           </span>
         ),
       },
@@ -161,6 +177,7 @@ export default function CampaignsPage() {
             {canEdit && <Button onClick={() => setCreating("new")}><Icon icon={PlusIcon} size={14} /> Создать</Button>}
             <GroupsButton type="campaigns" />
             <SearchInput value={q} onChange={setQ} placeholder="Название или ID" className="sm:w-64" />
+            <Slicer label="Теги" options={[...new Set((list.data ?? []).flatMap((c) => c.tags))].sort().map((t) => ({ value: t, label: t }))} value={tags} onChange={(v) => setTagsRaw(v.join(","))} />
           </>
         }
         right={

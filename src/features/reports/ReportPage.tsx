@@ -59,7 +59,7 @@ const PRESETS: { key: string; label: string; g: string[]; m?: string[]; f?: Repo
 ]
 const METRIC_GROUPS = { traffic: "Трафик", conversions: "Конверсии", money: "Деньги", rates: "Показатели" } as const
 // PBI-like slicers above the table: each one is an «в списке» filter on its field.
-const SLICERS = ["team", "buyer", "country", "approach", "offer_group", "affiliate_network", "agency"]
+const SLICERS = ["team", "buyer", "country", "approach", "campaign_tag", "offer_group", "affiliate_network", "agency"]
 
 const csv = (s: string | null) => (s ? s.split(",").filter(Boolean) : [])
 
@@ -218,7 +218,7 @@ export default function ReportPage() {
 
 // ---------- toolbar parts ----------
 
-const SLICER_LABEL: Record<string, string> = { affiliate_network: "Партнёрка", country: "Гео" }
+const SLICER_LABEL: Record<string, string> = { affiliate_network: "Партнёрка", country: "Гео", campaign_tag: "Тег" }
 const isSlicer = (f: ReportFilter) => f.operator === "IN_LIST" && SLICERS.includes(f.name)
 
 function Slicers({ filters, onChange }: { filters: ReportFilter[]; onChange: (f: ReportFilter[]) => void }) {

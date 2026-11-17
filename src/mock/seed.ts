@@ -243,7 +243,7 @@ export const landings: Landing[] = [
   ["US | Wheel spin", 30], ["US | Scratch card", 30], ["BR | Roleta", 31], ["US | Blue Clean (копия)", 30],
 ].map(([name, g], i) => ({
   id: [128, 160, 161, 94, 132, 144, 210, 95][i], name: name as string, state: i === 7 ? "disabled" : "active",
-  landing_type: (i % 3 === 2 ? "external" : "local") as Landing["landing_type"], action_type: "local_file",
+  landing_type: (i % 3 === 2 ? "external" : "local") as Landing["landing_type"], action_type: i % 3 === 2 ? "http" : "local_file",
   url: i % 3 === 2 ? `https://pre.example.net/${hex(5)}/` : "", group_id: g as number, notes: "",
   created_at: iso(daysAgo(between(20, 120))), updated_at: iso(daysAgo(between(0, 15))),
 }))
@@ -337,6 +337,7 @@ CAMPAIGN_DEFS.forEach(([name, b, geo, state, approach], i) => {
     id: 2552 + i * 7, name, alias: hex(8), state, group_id: b + 1,
     traffic_source_id: 2, domain_id: (i % 2) + 1,
     uniqueness_method: "ip_ua", uniqueness_use_cookies: true, cookies_ttl: 1440, stats_excluded: approach === "UGC" && geo === "US" && b === 7,
+    tags: [...(name.includes("PWA") ? ["PWA"] : []), ...(name.includes("iOS") ? ["iOS"] : []), ...(name.includes("test") ? ["тест"] : []), ...(i % 3 === 0 ? ["скейл"] : [])],
     parameters: [
       ...fbParams,
       { name: "sub_id_5", alias: "Пиксель", placeholder: "{fbp}" },
@@ -533,6 +534,25 @@ const CITIES: Record<string, string[]> = {
   Florida: ["Tampa", "Miami"], Ohio: ["Dayton", "Columbus"], Oklahoma: ["Norman", "Tulsa"],
 }
 
+// os / browser versions, user agent, language, ISP, carrier, referrer of a demo click
+function clickDetails(n: number, geo: string, os: string, browser: string) {
+  const v = os === "iOS" ? ["17.6", "18.1", "18.3", "18.5"][n % 4] : ["13", "14", "15"][n % 3]
+  const bv = browser === "Safari" ? v.split(".")[0] + ".0" : browser === "Chrome" ? ["129.0", "130.0", "131.0"][n % 3] : ["482.0", "489.0"][n % 2]
+  const ua = os === "iOS"
+    ? `Mozilla/5.0 (iPhone; CPU iPhone OS ${v.replace(".", "_")} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148${browser === "Safari" ? ` Version/${bv} Safari/604.1` : ` [FBAN/FBIOS;FBAV/${bv}]`}`
+    : `Mozilla/5.0 (Linux; Android ${v}; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${bv}.0 Mobile Safari/537.36`
+  const us = geo === "US"
+  const carriers = us ? ["T-Mobile", "Verizon", "AT&T"] : ["Vivo", "Claro", "TIM"]
+  const isps = us ? ["Comcast", "Charter Spectrum", "AT&T Internet", "Verizon Fios"] : ["Vivo Fibra", "Claro NET", "Oi"]
+  const mobile = n % 5 < 3
+  return {
+    os_version: v, browser_version: bv, user_agent: ua, language: us ? (n % 9 === 0 ? "es" : "en") : "pt",
+    isp: mobile ? carriers[n % 3] : isps[n % isps.length], operator: mobile ? carriers[n % 3] : "",
+    referrer: n % 4 === 0 ? "" : n % 4 === 1 ? "https://l.facebook.com/" : n % 4 === 2 ? "https://m.facebook.com/" : "https://l.instagram.com/",
+    ...(n % 6 === 0 ? { sub_id_7: "pwa_v2" } : {}),
+  }
+}
+
 export const clicks: Click[] = []
 export const conversions: Conversion[] = []
 {
@@ -580,6 +600,8 @@ export const conversions: Conversion[] = []
           sub_id_1: lost ? "" : acct, sub_id_2: lost ? "" : pick(["Facebook_Mobile_Feed", "Instagram_Stories", "Facebook_Stories", "Instagram_Feed"]),
           sub_id_3: lost ? "" : set.id, sub_id_4: lost ? "" : set.name, sub_id_5: `${between(10, 99)}${hex(6)}`,
           sub_id_6: lost ? "" : ad.id, buyer_id: c.owner_id,
+          // device / network details derived from the click number (no extra random draws: the rest of the demo stays the same)
+          ...clickDetails(seq, geo, os, browser),
         })
         if (lp && oid) {
           const q = (quality.get(s.id) ?? 1) * (landingQ[lid ?? 0] ?? 1)

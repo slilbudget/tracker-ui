@@ -69,6 +69,8 @@ function dimensionValue(c: Click, dim: string, tz: string): string {
     case "buyer": return usrs.get(c.buyer_id)?.login ?? "—"
     case "team": return usrs.get(c.buyer_id)?.team ?? "—"
     case "approach": return camp.get(c.campaign_id)?.approach || "—"
+    // a campaign may have several tags: buildReport puts the click under each tag, filters match any of them (see matches)
+    case "campaign_tag": return camp.get(c.campaign_id)?.tags.join(", ") || "—"
     case "product": {
       const o = offerOf(c)
       return (o?.group_id && ogrp.get(o.group_id)?.product) || "—"
@@ -143,9 +145,20 @@ function metricsOf(a: Acc): Record<string, number> {
 }
 
 function matches(c: Click, f: ReportFilter, tz: string) {
-  const v = dimensionValue(c, f.name, tz)
   const e = f.expression
   const list = (Array.isArray(e) ? e : [e]).map(String)
+  if (f.name === "campaign_tag") {
+    const tags = camp.get(c.campaign_id)?.tags ?? []
+    const any = (pred: (t: string) => boolean) => (tags.length ? tags.some(pred) : pred("—"))
+    switch (f.operator) {
+      case "EQUALS": case "IN_LIST": return any((t) => list.includes(t))
+      case "NOT_EQUAL": case "NOT_IN_LIST": return !any((t) => list.includes(t))
+      case "CONTAINS": return any((t) => t.toLowerCase().includes(String(e).toLowerCase()))
+      case "NOT_CONTAIN": return !any((t) => t.toLowerCase().includes(String(e).toLowerCase()))
+      default: return true
+    }
+  }
+  const v = dimensionValue(c, f.name, tz)
   switch (f.operator) {
     case "EQUALS": return v === String(e)
     case "NOT_EQUAL": return v !== String(e)
@@ -177,11 +190,18 @@ export function buildReport(req: ReportRequest): ReportResponse {
   const groups = new Map<string, { dims: string[]; acc: Acc }>()
   const total = empty()
   for (const c of clicks) {
-    const dims = req.dimensions.map((d) => dimensionValue(c, d, tz))
-    const key = dims.join("\u0001")
-    let g = groups.get(key)
-    if (!g) groups.set(key, (g = { dims, acc: empty() }))
-    add(g.acc, c)
+    // a campaign with several tags counts under each of them (rows by tag may add up to more than the total)
+    let combos: string[][] = [[]]
+    for (const d of req.dimensions) {
+      const vs = d === "campaign_tag" ? (camp.get(c.campaign_id)?.tags.length ? camp.get(c.campaign_id)!.tags : ["—"]) : [dimensionValue(c, d, tz)]
+      combos = combos.flatMap((x) => vs.map((v) => [...x, v]))
+    }
+    for (const dims of combos) {
+      const key = dims.join("\u0001")
+      let g = groups.get(key)
+      if (!g) groups.set(key, (g = { dims, acc: empty() }))
+      add(g.acc, c)
+    }
     add(total, c)
   }
   let rows: ReportRow[] = [...groups.values()].map(({ dims, acc }) => {

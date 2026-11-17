@@ -16,6 +16,7 @@ import {
   ConfirmDialog, CopyButton, EntitySheet, FormRow, SearchInput, EntityName, StateFilter, metricColumns, metricSummary,
 } from "@/components/common"
 import { Icon } from "@/components/icon"
+import { REDIRECT_TYPES, RedirectSelect } from "@/components/redirect-select"
 import { GroupsButton } from "@/features/groups/GroupsDialog"
 import { FileDrop, fmtSize } from "@/features/catalog/FileDrop"
 import { FormSection, LIST_METRICS, LIST_METRICS_EXTRA, UsedIn, sortMetrics } from "@/features/catalog/ui"
@@ -31,7 +32,7 @@ const LANDING_EXTRA = ["lp_clicks", "lp_ctr"]
 const METRICS = sortMetrics([...LIST_METRICS, ...LIST_METRICS_EXTRA, ...LANDING_EXTRA])
 const TYPES: { value: Landing["landing_type"]; label: string; hint: string }[] = [
   { value: "local", label: "Локальный", hint: "ZIP-архив, хранится на трекере" },
-  { value: "external", label: "Внешний (редирект)", hint: "Страница на другом сервере" },
+  { value: "external", label: "Внешний (редирект)", hint: "Страница на другом сервере: трекер перенаправляет посетителя на её адрес" },
   { value: "preloaded", label: "Предзагрузка", hint: "Трекер скачивает страницу и подставляет макросы" },
   { value: "action", label: "Действие", hint: "Выполняет действие вместо показа страницы" },
 ]
@@ -275,7 +276,9 @@ function LandingSheet({
     if (form.landing_type !== "local" && !form.url?.trim()) e.url = "Укажите адрес страницы"
     setErr(e)
     if (Object.keys(e).length) return
-    onSave({ ...form, id: landing?.id }, zip)
+    // an external landing always has one of the three redirect types (http by default)
+    const action_type = form.landing_type === "external" ? (REDIRECT_TYPES.some((a) => a.key === form.action_type) ? form.action_type : "http") : form.action_type
+    onSave({ ...form, action_type, id: landing?.id }, zip)
   }
 
   const checkUrl = async () => {
@@ -321,6 +324,11 @@ function LandingSheet({
               </Button>
             )}
           </div>
+        </FormRow>
+      )}
+      {type === "external" && (
+        <FormRow label="Тип редиректа">
+          <RedirectSelect value={REDIRECT_TYPES.some((a) => a.key === form.action_type) ? form.action_type! : "http"} onChange={(v) => set("action_type", v)} />
         </FormRow>
       )}
       <FormRow label="Группа">

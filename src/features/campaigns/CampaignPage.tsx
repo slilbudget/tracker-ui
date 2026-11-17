@@ -8,6 +8,7 @@ import { ChevronLeftIcon, EllipsisIcon, PlusIcon, XIcon } from "lucide-react"
 import type { Campaign, CampaignParameter, ConversionStatus, S2SPostback, Stream } from "@/api/types"
 import { api } from "@/api/client"
 import { cn } from "@/lib/utils"
+import { TagsInput } from "@/components/tags-input"
 import { CONVERSION_STATUSES } from "@/api/meta"
 import { ApproachSelect } from "./ApproachSelect"
 import { usePeriod, useUrlParam } from "@/app/state"
@@ -266,6 +267,9 @@ function CampaignPage({ id }: { id: string | undefined }) {
               <FormRow label="Подход" hint="Кампания = подход + гео + байер. В отчётах есть группировка «Подход»">
                 <ApproachSelect value={form.approach} onChange={(v) => set("approach", v)} disabled={!canEdit} allowEmpty />
               </FormRow>
+              <FormRow label="Теги" hint="Любые метки для фильтров: «тест», «скейл», «iOS». Enter или запятая — добавить. Фильтр по тегам есть в списке кампаний и в отчёте">
+                <TagsInput value={form.tags} onChange={(v) => set("tags", v)} disabled={!canEdit} suggestions={[...new Set((allCampaigns.data ?? []).flatMap((c) => c.tags))].sort()} />
+              </FormRow>
               <FormRow label="Группа">
                 <Select value={form.group_id ? String(form.group_id) : "none"} onValueChange={(v) => set("group_id", v === "none" ? null : Number(v))}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
@@ -312,7 +316,7 @@ function CampaignPage({ id }: { id: string | undefined }) {
 
             <div>
               <h3 className="py-2 text-base font-medium">Уникальность</h3>
-              <FormRow label="Уникальность">
+              <FormRow label="Уникальность" hint="Как трекер узнаёт вернувшегося посетителя. От этого зависят «уникальные клики» и то, что вернувшийся попадает в тот же поток, лендинг и оффер. Обычно — IP + User-Agent и cookies. «По параметру» — если источник передаёт свой ID посетителя">
                 <div className="flex flex-col gap-2">
                   <RadioGroup value={form.uniqueness_method} onValueChange={(v) => set("uniqueness_method", v as Campaign["uniqueness_method"])} className="flex flex-wrap gap-4">
                     <Label className="flex items-center gap-2 font-normal"><RadioGroupItem value="ip_ua" />IP + User-Agent</Label>
@@ -324,7 +328,7 @@ function CampaignPage({ id }: { id: string | undefined }) {
                   </Label>
                 </div>
               </FormRow>
-              <FormRow label="Срок уникальности" hint="От 1 до 8760 часов">
+              <FormRow label="Срок уникальности" hint="Сколько часов посетитель считается тем же самым (1–8760). После срока его клик снова уникальный, и поток выбирается заново">
                 <div className="flex items-center gap-2">
                   <Input type="number" min={1} max={8760} className="w-24" value={form.cookies_ttl} onChange={(e) => set("cookies_ttl", Number(e.target.value))} />
                   <span className="text-sm text-muted-foreground">часов</span>

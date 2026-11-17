@@ -20,7 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { previousRange } from "@/lib/dates"
-import { fmtMetric, signClass } from "@/lib/format"
+import { flag, fmtMetric, signClass } from "@/lib/format"
 import { RELAX_HINT, hasExactFilter } from "./FilterBuilder"
 import { fmtDayKey, reportLink } from "./shared"
 
@@ -318,6 +318,7 @@ export function ReportGrid({
         {custom && <> · <button type="button" className="text-link" onClick={resetState}>Сбросить ширину и порядок колонок</button></>}
         {compare && topPrev.data && <> · сравнение с {fmtDayKey(prevRange.from ?? "")} — {fmtDayKey(prevRange.to ?? "")}; п.п. — процентные пункты</>}
         {dims.length > 1 && <> · нажмите строку, чтобы раскрыть уровень «{dimensionDef(dims[1])?.name}»</>}
+        {dims.includes("campaign_tag") && <> · кампания с несколькими тегами считается в каждом из них, поэтому строки в сумме могут быть больше «Итого»</>}
       </div>
     </div>
   )
@@ -349,7 +350,7 @@ function DimCell(p: CustomCellRendererProps<GridRow> & { dims: string[]; filters
   }
   if (row.kind !== "row") return <span className="text-muted-foreground" style={pad}>{row.value}</span>
   const dim = p.dims[row.level]
-  const text = dim === "day" ? fmtDayKey(row.value) : row.value
+  const text = dim === "day" ? fmtDayKey(row.value) : dim === "country" ? `${flag(row.value)} ${row.value}`.trim() : row.value
   return (
     <span className="flex h-full min-w-0 items-center gap-1" style={pad} title={text}>
       {row.canExpand

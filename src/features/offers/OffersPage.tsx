@@ -7,7 +7,8 @@ import { toast } from "sonner"
 import { ChevronDownIcon, EllipsisIcon, PlusIcon } from "lucide-react"
 import type { Offer, OfferGroupCap } from "@/api/types"
 import { api } from "@/api/client"
-import { COUNTRIES, REGIONS, STREAM_ACTIONS, regionCountry } from "@/api/meta"
+import { COUNTRIES, REGIONS, regionCountry } from "@/api/meta"
+import { RedirectSelect } from "@/components/redirect-select"
 import { DevNote } from "@/features/devnotes/notes"
 import { useAccess, useCanSeeMoney, useHiddenMetrics, usePeriod, useUrlParam, useMissingRecord } from "@/app/state"
 import { Page, PageHeader, Toolbar } from "@/components/page"
@@ -29,7 +30,6 @@ import { FilterSelect, FormSection, LIST_METRICS, LIST_METRICS_EXTRA, RefSelect,
 import { CapCell, fmtTerm, geoText } from "./caps"
 
 const METRICS = sortMetrics([...LIST_METRICS, ...LIST_METRICS_EXTRA])
-const REDIRECTS = STREAM_ACTIONS.filter((a) => a.kind === "redirect")
 
 // the rate in force today comes from the group's terms; payout_value is the backend's copy of it
 const rateOf = (o: Offer, caps?: Record<string, OfferGroupCap>) => caps?.[o.group_id ?? 0]?.term?.payouts[String(o.id)] ?? o.payout_value
@@ -372,11 +372,8 @@ function OfferSheet({
             </FormRow>
           ) : (
             <>
-              <FormRow label="Тип редиректа" hint={REDIRECTS.find((a) => a.key === form.action_type)?.description}>
-                <Select value={form.action_type} onValueChange={(v) => set("action_type", v)}>
-                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>{REDIRECTS.map((a) => <SelectItem key={a.key} value={a.key}>{a.name}</SelectItem>)}</SelectContent>
-                </Select>
+              <FormRow label="Тип редиректа">
+                <RedirectSelect value={form.action_type ?? "http"} onChange={(v) => set("action_type", v)} />
               </FormRow>
               <FormRow label="URL" error={err.url} hint="Макросы: {subid}, {external_id}, {sub_id_1}…{sub_id_30}, {campaign_id}">
                 <Input value={form.url ?? ""} onChange={(e) => set("url", e.target.value)} placeholder="https://" aria-invalid={!!err.url} />

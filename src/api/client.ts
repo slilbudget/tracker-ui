@@ -241,10 +241,7 @@ export const api = {
         const k = clickBySubId(c.sub_id)
         return {
           ...c,
-          click: k ? {
-            ts_id: k.ts_id, country: k.country, region: k.region, city: k.city, os: k.os, browser: k.browser, device_type: k.device_type, ip: k.ip,
-            external_id: k.external_id, sub_id_1: k.sub_id_1, sub_id_2: k.sub_id_2, sub_id_3: k.sub_id_3, sub_id_4: k.sub_id_4, sub_id_5: k.sub_id_5, sub_id_6: k.sub_id_6,
-          } : null,
+          click: k ? (({ sub_id: _s, campaign_id: _c, stream_id: _st, landing_id: _l, offer_id: _o, buyer_id: _b, cost: _cost, ...rest }) => rest)(k) : null,
         }
       }
       return wait({ rows: (rows.slice(q.offset, q.offset + q.limit) as Conversion[]).map(withClick), total: rows.length })

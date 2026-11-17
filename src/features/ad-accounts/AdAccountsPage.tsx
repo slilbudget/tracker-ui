@@ -5,9 +5,8 @@ import { useSearchParams } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { toast } from "sonner"
-import { EyeIcon, PlusIcon, XIcon } from "lucide-react"
-import type { AdAccountAssignment, AdFeePeriod, AdProvider, FbAdAccount, FbCampaign } from "@/api/types"
-import { TIMEZONES, CURRENCIES } from "@/api/meta"
+import { EyeIcon, FileJsonIcon, PlusIcon, XIcon } from "lucide-react"
+import type { AccountImportResult, AccountImportRow, AdAccountAssignment, AdFeePeriod, AdProvider, FbAdAccount, FbCampaign } from "@/api/types"
 import { api } from "@/api/client"
 import { useAccess, useApp, useUrlParam } from "@/app/state"
 import { Page, PageHeader, Toolbar } from "@/components/page"
@@ -15,6 +14,8 @@ import { DataTable } from "@/components/data-table"
 import { EntitySheet, FormRow, SearchInput } from "@/components/common"
 import { Icon } from "@/components/icon"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { CopyButton } from "@/components/common"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
@@ -132,6 +133,7 @@ function AccountsTab() {
         left={
           <>
             {isFull && <Button onClick={() => setEditId("new")}><Icon icon={PlusIcon} size={14} /> Добавить</Button>}
+            {isFull && <ImportAccountsButton />}
             <SearchInput value={q} onChange={setQ} placeholder="ID или название" className="sm:w-56" />
           </>
         }
@@ -202,7 +204,9 @@ function AccountForm({ account, assignments, fees, unattributed, transfer, canEd
     mutationFn: () => {
       // buyers may change only the comment and the alert threshold; token / proxy only admins
       const patch: Partial<FbAdAccount> = isFull ? f : { spend_diff_comment: f.spend_diff_comment, alert_on_spend_diff: f.alert_on_spend_diff }
-      return account ? api.adAccounts.update(account.id, patch) : api.adAccounts.create(f)
+      // currency / timezone / FB creation date are read from FB by the server
+      const { currency: _c, timezone: _t, created_at: _d, ...fields } = f
+      return account ? api.adAccounts.update(account.id, patch) : api.adAccounts.create(fields)
     },
     onSuccess: () => { refresh(); toast.success(account ? "Кабинет сохранён" : "Кабинет добавлен"); onDone() },
     onError: (e: Error) => toast.error(e.message),
@@ -231,20 +235,9 @@ function AccountForm({ account, assignments, fees, unattributed, transfer, canEd
               <RefSelect value={f.provider_id} onChange={(v) => set("provider_id", v)} noneLabel="Не указан" options={providers.map((p) => ({ id: p.id, name: `${p.name} · ${pct(p.fee)}${p.self_made ? " · наш фарм" : ""}` }))} />
             </fieldset>
           </FormRow>
-          <div className="grid gap-x-4 sm:grid-cols-2">
-            <FormRow label="Валюта">
-              <Select value={f.currency} onValueChange={(v) => set("currency", v)} disabled={!isFull}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>{CURRENCIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-              </Select>
-            </FormRow>
-            <FormRow label="Часовой пояс">
-              <Select value={f.timezone} onValueChange={(v) => set("timezone", v)} disabled={!isFull}>
-                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>{[...new Set([f.timezone, ...TIMEZONES])].map((z) => <SelectItem key={z} value={z}>{z}</SelectItem>)}</SelectContent>
-              </Select>
-            </FormRow>
-          </div>
+          <FormRow label="Валюта и пояс" hint="Берутся из Facebook по токену, вручную не задаются">
+            <span className="text-sm">{account ? `${account.currency} · ${account.timezone}` : <span className="text-muted-foreground">подтянутся из Facebook после сохранения</span>}</span>
+          </FormRow>
           <FormRow label="Передан нам" htmlFor="acc-handed">
             <Input id="acc-handed" type="date" className="w-44" disabled={!isFull} value={f.handed_at.slice(0, 10)} onChange={(e) => set("handed_at", new Date(`${e.target.value}T00:00:00Z`).toISOString())} />
           </FormRow>
@@ -553,5 +546,108 @@ function ProviderRow({ p, canEdit, count, onDone }: { p: AdProvider; canEdit: bo
       <td className="num px-3 py-1.5 text-right">{count}</td>
       <td className="px-3 py-1.5 text-right">{dirty && <Button size="sm" disabled={!v.name.trim() || save.isPending} onClick={() => save.mutate()}>Сохранить</Button>}</td>
     </tr>
+  )
+}
+
+// ---------- bulk add from JSON ----------
+
+const IMPORT_EXAMPLE = `[
+  {
+    "id": "act_1234567890123",
+    "api_token": "EAAG…",
+    "proxy": "login:password@1.2.3.4:8000",
+    "buyer": "a_volkov",
+    "provider": "Agent Nova",
+    "fee": 7
+  }
+]`
+
+function ImportAccountsButton() {
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState("")
+  const [parseError, setParseError] = useState("")
+  const [checked, setChecked] = useState<AccountImportResult[] | null>(null)
+  const parse = (): AccountImportRow[] | null => {
+    try {
+      const v = JSON.parse(text)
+      const rows = Array.isArray(v) ? v : [v]
+      if (!rows.every((r) => r && typeof r === "object")) throw new Error("каждый кабинет — объект в фигурных скобках")
+      setParseError("")
+      return rows
+    } catch (e) {
+      setParseError(`Не JSON: ${(e as Error).message}. Сверьте с примером`)
+      return null
+    }
+  }
+  const check = useMutation({
+    mutationFn: (rows: AccountImportRow[]) => api.adAccounts.importJson(rows, false),
+    onSuccess: (r) => setChecked(r.results),
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const apply = useMutation({
+    mutationFn: (rows: AccountImportRow[]) => api.adAccounts.importJson(rows, true),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["adAccounts"] })
+      qc.invalidateQueries({ queryKey: ["fbAccounts"] })
+      toast.success(`Добавлено кабинетов: ${r.created}`)
+      setOpen(false); setText(""); setChecked(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+  const ok = checked?.filter((r) => !r.error).length ?? 0
+  return (
+    <>
+      <Button variant="outline" onClick={() => setOpen(true)}><Icon icon={FileJsonIcon} size={14} /> Импорт JSON</Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="flex max-h-[min(44rem,calc(100dvh-2rem))] flex-col sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Добавить кабинеты списком</DialogTitle>
+            <DialogDescription>
+              Вставьте JSON — массив кабинетов. Обязательны <code>id</code> и <code>api_token</code>. Валюту, часовой пояс и дату создания трекер
+              возьмёт из Facebook сам. <code>buyer</code> — логин байера (кабинет закрепится за ним с сегодня), <code>provider</code> — имя провайдера,
+              <code> fee</code> — комиссия этого кабинета в % с сегодня. Необязательно: <code>name</code>, <code>handed_at</code> (ГГГГ-ММ-ДД), <code>multi_geo</code>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">Пример <CopyButton value={IMPORT_EXAMPLE} label="Копировать пример" /></div>
+            <Textarea
+              rows={10}
+              value={text}
+              onChange={(e) => { setText(e.target.value); setChecked(null) }}
+              placeholder={IMPORT_EXAMPLE}
+              className="font-mono text-xs"
+              aria-label="JSON с кабинетами"
+              aria-invalid={!!parseError}
+            />
+            {parseError && <p className="text-sm text-destructive">{parseError}</p>}
+            {checked && (
+              <div className="overflow-x-auto rounded-md border">
+                <table className="w-full text-sm">
+                  <thead className="text-left text-[13px] text-muted-foreground">
+                    <tr className="border-b"><th className="px-2 py-1.5 font-medium">#</th><th className="px-2 py-1.5 font-medium">ID</th><th className="px-2 py-1.5 font-medium">Проверка</th></tr>
+                  </thead>
+                  <tbody>
+                    {checked.map((r) => (
+                      <tr key={r.index} className="border-b last:border-0">
+                        <td className="num px-2 py-1.5 text-muted-foreground">{r.index + 1}</td>
+                        <td className="px-2 py-1.5 font-mono">{r.id || "—"}</td>
+                        <td className={cn("px-2 py-1.5", r.error ? "text-destructive" : r.warning ? "text-warning" : "text-success")}>{r.error || r.warning || "Готов к добавлению"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setOpen(false)}>Отмена</Button>
+            {checked && ok > 0
+              ? <Button disabled={apply.isPending} onClick={() => { const rows = parse(); if (rows) apply.mutate(rows) }}>Добавить {ok} {ok === checked.length ? "" : `из ${checked.length}`}</Button>
+              : <Button disabled={!text.trim() || check.isPending} onClick={() => { const rows = parse(); if (rows) check.mutate(rows) }}>Проверить</Button>}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

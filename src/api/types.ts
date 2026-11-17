@@ -46,6 +46,8 @@ export interface Campaign {
   cookies_ttl: number // hours
   // «Не учитывать в статистике»: the campaign keeps working; reports, dashboard and trends leave it out unless asked
   stats_excluded: boolean
+  // free tags for filtering (e.g. «тест», «скейл», «iOS»): campaign list, report filter / grouping «Тег кампании»
+  tags: string[]
   parameters: CampaignParameter[]
   postbacks: S2SPostback[]
   notes: string
@@ -272,7 +274,10 @@ export interface Domain {
 
 export type ConversionStatus = "lead" | "sale" | "rejected" | "rebill" | "registration" | "deposit"
 
-export interface Click {
+// sub_id_7…sub_id_30: free campaign parameters (Keitaro has 30); empty unless the campaign link fills them
+export type ExtraSubId = `sub_id_${7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25 | 26 | 27 | 28 | 29 | 30}`
+
+export interface Click extends Partial<Record<ExtraSubId, string>> {
   sub_id: string // click id
   datetime: ISODate
   campaign_id: ID
@@ -288,6 +293,13 @@ export interface Click {
   browser: string
   device_type: "mobile" | "desktop" | "tablet"
   device_model: string
+  os_version: string
+  browser_version: string
+  user_agent: string
+  language: string // browser language, e.g. en
+  isp: string // internet provider
+  operator: string // mobile carrier (empty on Wi-Fi)
+  referrer: string // page the visitor came from (empty when the browser hides it)
   connection_type: string
   is_bot: boolean
   is_unique_campaign: boolean
@@ -324,9 +336,10 @@ export interface Conversion {
 }
 // A conversions log row: the conversion + the fields of its click (geo, device, parameters), as in Keitaro's log
 export type ConversionLogRow = Conversion & {
-  click: Pick<Click, "ts_id" | "country" | "region" | "city" | "os" | "browser" | "device_type" | "ip" | "external_id"
-    | "sub_id_1" | "sub_id_2" | "sub_id_3" | "sub_id_4" | "sub_id_5" | "sub_id_6"> | null
+  click: ClickFields | null
 }
+// the fields of a click shown next to a conversion (ids, buyer and cost stay on the conversion / are hidden)
+export type ClickFields = Omit<Click, "sub_id" | "campaign_id" | "stream_id" | "landing_id" | "offer_id" | "buyer_id" | "cost">
 
 type PostbackDirection = "in" | "out"
 export interface PostbackLogEntry {
@@ -428,8 +441,8 @@ export interface FbAdAccount {
   proxy: string
   active: boolean // false: metrics and balance are not parsed, no alerts
   last_error: string // last FB API error
-  currency: string
-  timezone: string
+  currency: string // from the FB API (account currency), never typed in
+  timezone: string // from the FB API (timezone_name), never typed in
   created_at: ISODate // created in FB
   handed_at: ISODate // given to us (our_after)
   total_spend: number
@@ -442,6 +455,20 @@ export interface FbAdAccount {
   disabled_at: ISODate | null
   multi_geo: boolean
 }
+// One account in the bulk JSON import («Импорт JSON» on Кабинеты). Currency, timezone and creation date come from FB.
+export interface AccountImportRow {
+  id: string // act_… (digits alone are accepted)
+  api_token: string
+  proxy?: string // login:password@host:port or host:port
+  buyer?: string // login; the account is assigned to them from today
+  provider?: string // provider name (Кабинеты → Провайдеры)
+  fee?: number // %, this account's own fee from today (needs a provider)
+  name?: string // default: the name in FB
+  handed_at?: string // YYYY-MM-DD, default today
+  multi_geo?: boolean
+}
+export interface AccountImportResult { index: number; id: string; error: string; warning: string }
+
 // Account → buyer for a period. The fee is not here: it belongs to the provider (AdFeePeriod).
 export interface AdAccountAssignment {
   id: ID

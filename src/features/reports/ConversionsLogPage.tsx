@@ -23,9 +23,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { formatDateTime } from "@/lib/dates"
 import { fmtMoney } from "@/lib/format"
 import { BulkStatusDialog, ConversionSheet, duration } from "./ConversionSheet"
-import { DEVICE } from "./ClickSheet"
 import { ImportSheet } from "./ImportSheet"
-import { CampaignSelect, Clip, ConversionStatusCell, EntityName, STATUS_SHORT, SUBS, SUB_ALIASES, useColumnPrefixes, usePage, useNames } from "./shared"
+import { CampaignSelect, Clip, ConversionStatusCell, EntityName, STATUS_SHORT, CLICK_FIELDS, useColumnPrefixes, usePage, useNames } from "./shared"
 
 const DEFAULT_COLS = ["campaign", "buyer", "landing", "offer", "network", "status", "reject_reason", "revenue"]
 
@@ -118,15 +117,8 @@ export default function ConversionsLogPage() {
     add("ID", "campaign_id", "ID кампании", (c) => c.campaign_id, { meta: { align: "right" } })
     add("ID", "stream_id", "ID потока", (c) => c.stream_id, { meta: { align: "right" } })
     add("ID", "offer_id", "ID оффера", (c) => c.offer_id ?? "—", { meta: { align: "right" } })
-    add("ID", "external_id", "External ID", (c) => c.click?.external_id ?? "—", { cell: ({ row }) => mono(row.original.click?.external_id ?? "—") })
-    for (const k of SUBS) add("Параметры клика", k, `${k} · ${SUB_ALIASES[k]}`, (c) => c.click?.[k] ?? "—", {}, SUB_ALIASES[k])
-    add("Гео и устройство", "country", "Страна", (c) => c.click?.country ?? "—")
-    add("Гео и устройство", "region", "Регион", (c) => c.click?.region ?? "—")
-    add("Гео и устройство", "city", "Город", (c) => c.click?.city ?? "—")
-    add("Гео и устройство", "device", "Устройство", (c) => (c.click ? DEVICE[c.click.device_type] ?? c.click.device_type : "—"))
-    add("Гео и устройство", "os", "ОС", (c) => c.click?.os ?? "—")
-    add("Гео и устройство", "browser", "Браузер", (c) => c.click?.browser ?? "—")
-    add("Гео и устройство", "ip", "IP", (c) => c.click?.ip ?? "—", { cell: ({ row }) => mono(row.original.click?.ip ?? "—") })
+    // the click of the conversion: geo (with the flag), device, connection, every sub_id
+    for (const f of CLICK_FIELDS) add(f.group === "Параметры" ? "Параметры клика" : f.group, f.id, f.label, (c) => (c.click ? f.value(c.click) || "—" : "—"), f.mono ? { cell: ({ row }) => <span className="font-mono">{row.original.click ? f.value(row.original.click) || "—" : "—"}</span> } : {}, f.header ?? f.label)
     return defs
   }, [names.data, timezone, money, pre, seeNetworks])
   const choice = useColumnChoice("conversions", catalog, DEFAULT_COLS, FIXED)
